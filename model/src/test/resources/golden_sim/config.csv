@@ -1,0 +1,14 @@
+setting,value
+sex,male
+age,46
+height,180.0
+goal_weight,82.0
+goal_rate,0.5
+b_kcal_per_kg,22
+energy_density,7700
+weight_noise_kg,0.6
+offset_sedentary,-150
+offset_moderate,200
+offset_heavy,400
+adaptation_ref_date,
+units,metric
