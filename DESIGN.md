@@ -168,7 +168,7 @@ Update step, on days with a weight: scalar Kalman update with `H = [1,0,0,0,0]` 
 Display rounding as in the script: kcal values to the nearest 10; weights to 0.1.
 
 ### 4.3 Verification
-- Use the Python script to produce **golden files**: CSVs of inputs and every output column for (a) `simulate` and (b) optionally a private export of your own tracker workbook (not committed).
+- Use the Python script to produce **golden files**: CSVs of inputs and every output column for (a) `simulate` (committed) and (b) optionally a private export of your own tracker workbook (not committed; passed to the test with `-Pgolden.extra=<dir>`).
 - Kotlin unit tests run `:model` on the same inputs and assert matches: weights within 0.05, kcal within 10, flags and strings exact.
 - When the model changes, change the Python version first, regenerate the golden files, then port.
 
