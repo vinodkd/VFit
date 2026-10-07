@@ -173,29 +173,36 @@ Display rounding as in the script: kcal values to the nearest 10; weights to 0.1
 - When the model changes, change the Python version first, regenerate the golden files, then port.
 
 ## 5. Screens
-Bottom tabs: Today, Dashboard, Charts, Settings. (A History tab was dropped: the Today date picker and CSV export cover it.)
+Bottom tabs: Today, Do next, Trends, Settings. (A History tab was dropped: the Today date picker and CSV export cover it.)
 
 1. **Today**: the day as a timeline, like a to-do list. Each step is a tinted card on a vertical line; its dot fills in once logged.
-   1. Morning check-in: "Fasting today" switch, then weight, fasting glucose, waist, grip (optional), saved together.
+   1. Morning check-in: "Fasting today" switch, then weight, fasting glucose, waist, grip (optional), and under
+      "More" blood pressure and pulse, saved together.
    2. Breakfast → 3. Morning snack → 4. Morning exercise → 5. Lunch → 6. Afternoon snack → 7. Exercise during the day →
       8. Dinner → 9. Evening snack.
-      - Food steps: chips for saved meals (most-logged in that slot first); tap logs one. "Other" adds a one-off, optionally saved.
-        Each logged meal has −/+ quantity and a "2 h after" glucose field underneath.
-      - Exercise steps: chips for recent exercises; add with duration.
-   10. End of day: overall activity level (feeds the model), strength top sets, and the imported-total notice.
+      - Food steps: "Not logged yet" until something is logged. "Log breakfast" opens a dialog: a search-as-you-type
+        dropdown of saved meals (most-logged in that slot first) or a new meal (name, kcal, optionally saved), amount
+        and time. Logged meals show a ✓, −/+ quantity and delete (with Undo).
+      - After any food step with something logged (or an imported reading): a separate "Blood sugar 2 h after …" step.
+      - Exercise steps: "Activity" (dropdown of past exercises, pre-filling the last duration) and "Strength set"
+        (dropdown of past lifts, pre-filling the last load and reps).
+   10. End of day: overall activity level (feeds the model) and the imported-total notice.
    - Header: date with previous/next and a calendar date picker; pills for kcal eaten, trend weight and TDEE.
-2. **Dashboard**: tiles with a big number, a one-line explanation and a sparkline: trend weight, TDEE, intake, adaptation,
-   settling weight, goal, waist, glucose (7-day fasting and post-meal averages), strength (if logged). A banner shows any
-   plateau/regain flag, and a "Next step" card (eat less / move more / hold / keep logging). The year-to-date card (top
-   of the Dashboard) counts and colours each day by what won: fasted, else lived (ate more than that day's TDEE), else
-   exercise or diet depending on whether estimated exercise calories (minutes × 4 net METs; 30 min for a strength set
-   without a duration) cover more of the deficit than eating less did. Blood-pressure tile and chart; the glucose tile
-   splits post-meal readings by breakfast/lunch/dinner. "Show details" expands the full `write_summary()` text.
-3. **Charts**: weight trend + forecast, TDEE vs intake, adaptation, waist, strength, blood glucose. Touch and slide on any
-   chart to pin a date (or date and time, for glucose): a guide line and dots mark it, and a readout above the chart lists
-   every series' value there.
+2. **Do next**: how you've managed so far and what to change: just two cards.
+   - Year at a glance: from 1 January (or the `period_start` setting) to today, each day coloured by what won:
+     fasted, else lived (ate more than that day's TDEE), else exercise or diet depending on whether estimated exercise
+     calories (minutes × 4 net METs; 30 min for a strength set without a duration) cover more of the deficit than
+     eating less did. Counts and % per kind; with `target_*` settings (share of days, %), days left (or over) out of
+     a year from the start.
+   - Next step: eat less / move more / hold / keep logging, with numbers.
+3. **Trends**: status tiles with sparklines (trend weight, TDEE, intake, adaptation, settling weight, goal, waist,
+   glucose split by meal, BP, strength), any plateau/regain banner, "Show details" (the full `write_summary()` text),
+   then the charts: weight trend + forecast, TDEE vs intake (assumed intake shown separately), adaptation, waist,
+   strength, blood pressure + pulse, blood glucose. Touch and slide on any chart to pin a date (or date and time, for
+   glucose): a guide line and dots mark it, and a readout above the chart lists every series' value there.
 4. **Meals** (from Today or Settings): manage saved meals (name, kcal, hide).
-5. **Settings**: Config values, units, glucose unit, import/export.
+5. **Settings**: Config values, units, glucose unit, assumed intake for unlogged days, the Do next period start and
+   targets, import/export.
 
 ## 6. Recompute flow
 Any change to entries or settings triggers `repository.recompute()`: load all days, build the input arrays, run `:model`, and cache the outputs in memory (`StateFlow<ModelResult>`). Outputs are not persisted, since they're always derivable. On a cold start the app recomputes once.

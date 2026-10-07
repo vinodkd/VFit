@@ -34,3 +34,17 @@ prev.alpha_composite(img)
 ImageDraw.Draw(prev).ellipse([(54 - 33) * u, (54 - 33) * u, (54 + 33) * u, (54 + 33) * u], outline=(255, 0, 0, 255))
 prev.save(os.path.join(os.path.dirname(__file__), "..", "build", "icon_preview.png"))
 print("ok")
+
+# web logo / favicon for docs/: the icon on its navy background, rounded, cropped to the safe zone
+docs = os.path.join(os.path.dirname(__file__), "..", "docs", "screenshots")
+os.makedirs(docs, exist_ok=True)
+z0, z1 = int(19 * u), int(89 * u)                       # 70dp square around the 66dp safe zone
+logo = Image.new("RGBA", (S, S), (0x1F, 0x4E, 0x79, 255))
+logo.alpha_composite(img)
+logo = logo.crop((z0, z0, z1, z1))
+mask = Image.new("L", logo.size, 0)
+ImageDraw.Draw(mask).rounded_rectangle([0, 0, logo.width - 1, logo.height - 1], radius=logo.width // 5, fill=255)
+logo.putalpha(mask)
+logo.resize((128, 128), Image.LANCZOS).save(os.path.join(docs, "logo.png"))
+logo.resize((32, 32), Image.LANCZOS).save(os.path.join(docs, "favicon.png"))
+print("web logo ok")

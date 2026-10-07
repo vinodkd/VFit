@@ -112,16 +112,24 @@ class TodayFlowTest {
         // activity for the model
         rule.onNodeWithText("Moderate").performScrollTo().performClick()
 
-        // dashboard shows tiles
-        rule.onNodeWithText("Dashboard").performClick()
+        // Do next: the year at a glance and the next step
+        rule.onNodeWithText("Do next").performClick()
+        rule.onNode(hasText(" so far · ", substring = true)).assertIsDisplayed()
+        rule.onNodeWithText("Fasted").assertIsDisplayed()
+        rule.onNodeWithText("NEXT STEP").performScrollTo().assertIsDisplayed()
+
+        // targets set in Settings show how many days are left
+        rule.onNodeWithText("Settings").performClick()
+        rule.onNode(hasText("Lived") and hasSetTextAction()).performScrollTo().performTextInput("20")
+        rule.onNodeWithText("Save settings").performScrollTo().performClick()
+        rule.onNodeWithText("Do next").performClick()
+        waitFor(" left", substring = true)
+
+        // Trends: tiles, then charts with a scrubber readout
+        rule.onNodeWithText("Trends").performClick()
         rule.onNodeWithText("Trend weight").assertIsDisplayed()
         rule.onNodeWithText("84.2 kg").assertIsDisplayed()
-        rule.onNode(hasText("so far", substring = true)).performScrollTo().assertIsDisplayed()
-        rule.onNodeWithText("Fasted").performScrollTo().assertIsDisplayed()
         rule.onNodeWithText("125/82").performScrollTo().assertIsDisplayed()      // blood pressure tile
-
-        // charts: scrubbing shows a dated readout
-        rule.onNodeWithText("Charts").performClick()
-        rule.onAllNodesWithText("Touch and slide on the chart to read values").onFirst().assertIsDisplayed()
+        rule.onAllNodesWithText("Touch and slide on the chart to read values").onFirst().performScrollTo().assertIsDisplayed()
     }
 }

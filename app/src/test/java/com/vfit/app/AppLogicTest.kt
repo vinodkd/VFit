@@ -46,7 +46,8 @@ class AppLogicTest {
     @Test
     fun settingsRoundTripThroughMap() {
         val s = AppSettings(imperial = true, male = false, age = 51.0, heightCm = 165.5, goalWeightKg = null,
-            goalRateKg = 0.25, adaptationRefDate = LocalDate.of(2026, 5, 1), glucoseMmol = true)
+            goalRateKg = 0.25, adaptationRefDate = LocalDate.of(2026, 5, 1), glucoseMmol = true,
+            periodStart = LocalDate.of(2026, 3, 11), targetLived = 20.0, targetFasted = 10.0)
         assertEquals(s, AppSettings.fromMap(s.toMap()))
         assertEquals(AppSettings(), AppSettings.fromMap(emptyMap()))
         assertNull(AppSettings.fromMap(mapOf("goal_weight" to "")).goalWeightKg)
@@ -171,5 +172,26 @@ class GapFillTest {
         assertEquals(0.0, Repository.dayCalories(DayEntry(1, fasting = true), emptyList())!!, 1e-9)
         assertEquals(300.0, Repository.dayCalories(DayEntry(1, fasting = true), listOf(MealEntry(date = 1, name = "soup", kcal = 300)))!!, 1e-9)
         assertNull(Repository.dayCalories(DayEntry(1), emptyList()))
+    }
+}
+
+class PeriodTest {
+    @Test
+    fun periodStartsOnChosenDayAndTargetsCountDaysLeft() {
+        val today = LocalDate.of(2026, 10, 6)
+        assertEquals(LocalDate.of(2026, 1, 1), com.vfit.app.ui.periodStart(today, null))
+        assertEquals(LocalDate.of(2026, 3, 11), com.vfit.app.ui.periodStart(today, LocalDate.of(2026, 3, 11)))
+        assertEquals(LocalDate.of(2026, 1, 1), com.vfit.app.ui.periodStart(today, LocalDate.of(2026, 12, 1)))  // future -> 1 Jan
+
+        val start = LocalDate.of(2026, 3, 11)
+        val days = (0 until 30).map { DayEntry(start.plusDays(it.toLong()).toEpochDay(), fasting = it < 5) }
+        val y = com.vfit.app.ui.yearStats(today, days, emptyList(), emptyList(), emptyList(), null, start)
+        assertEquals(start, y.start)
+        assertEquals(210, y.daysSoFar)                   // 11 Mar .. 6 Oct
+        assertEquals(365, y.periodDays)                  // a year from 11 Mar
+        assertEquals(155, y.daysLeft)
+        assertEquals(5, y.count(com.vfit.app.ui.DayKind.FASTED))
+        assertEquals(37 - 5, y.left(com.vfit.app.ui.DayKind.FASTED, 10.0))   // 10% of 365 = 37 days
+        assertEquals(-5, y.left(com.vfit.app.ui.DayKind.FASTED, 0.0))       // over target
     }
 }

@@ -22,6 +22,13 @@ data class AppSettings(
     val glucoseMmol: Boolean = false,
     /** Intake assumed for a past day with nothing logged and no logged neighbours to interpolate from (2 x 800 kcal meals). */
     val assumedIntake: Double = 1600.0,
+    /** First day of the "year" on Do next; null = 1 January of the current year. */
+    val periodStart: LocalDate? = null,
+    /** Target share of days (percent) per kind of day on Do next; null = no target. */
+    val targetExercise: Double? = null,
+    val targetDiet: Double? = null,
+    val targetFasted: Double? = null,
+    val targetLived: Double? = null,
 ) {
     fun toModelConfig() = ModelConfig(
         male = male, age = age, heightCm = heightCm, goalWeightKg = goalWeightKg, goalRateKg = goalRateKg,
@@ -46,6 +53,11 @@ data class AppSettings(
         "adaptation_ref_date" to (adaptationRefDate?.toString() ?: ""),
         "glucose_unit" to if (glucoseMmol) "mmol/L" else "mg/dL",
         "assumed_intake" to num(assumedIntake),
+        "period_start" to (periodStart?.toString() ?: ""),
+        "target_exercise" to (targetExercise?.let(::num) ?: ""),
+        "target_diet" to (targetDiet?.let(::num) ?: ""),
+        "target_fasted" to (targetFasted?.let(::num) ?: ""),
+        "target_lived" to (targetLived?.let(::num) ?: ""),
     )
 
     companion object {
@@ -72,6 +84,12 @@ data class AppSettings(
                     ?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() },
                 glucoseMmol = m["glucose_unit"]?.trim()?.lowercase()?.startsWith("mmol") ?: d.glucoseMmol,
                 assumedIntake = n("assumed_intake", d.assumedIntake),
+                periodStart = m["period_start"]?.trim()?.takeIf { it.isNotEmpty() }
+                    ?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() },
+                targetExercise = m["target_exercise"]?.trim()?.toDoubleOrNull(),
+                targetDiet = m["target_diet"]?.trim()?.toDoubleOrNull(),
+                targetFasted = m["target_fasted"]?.trim()?.toDoubleOrNull(),
+                targetLived = m["target_lived"]?.trim()?.toDoubleOrNull(),
             )
         }
     }

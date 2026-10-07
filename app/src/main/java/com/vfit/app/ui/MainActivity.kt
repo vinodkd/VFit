@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -47,8 +47,8 @@ private data class Dest(val route: String, val label: String, val icon: ImageVec
 
 private val tabs = listOf(
     Dest("today", "Today", Icons.Filled.Edit),
-    Dest("dashboard", "Dashboard", Icons.Filled.Home),
-    Dest("charts", "Charts", Icons.Filled.DateRange),
+    Dest("donext", "Do next", Icons.Filled.PlayArrow),
+    Dest("trends", "Trends", Icons.Filled.DateRange),
     Dest("settings", "Settings", Icons.Filled.Settings),
 )
 
@@ -86,8 +86,8 @@ fun VFitRoot(vm: AppViewModel) {
     ) { pad ->
         NavHost(nav, startDestination = "today", modifier = Modifier.padding(pad)) {
             composable("today") { TodayScreen(vm, onManageMeals = { nav.navigate("meals") }) }
-            composable("dashboard") { DashboardScreen(vm) }
-            composable("charts") { ChartsScreen(vm) }
+            composable("donext") { DoNextScreen(vm) }
+            composable("trends") { TrendsScreen(vm) }
             composable("settings") { SettingsScreen(vm, onManageMeals = { nav.navigate("meals") }) }
             composable("meals") { MealsScreen(vm, onBack = { nav.popBackStack() }) }
         }

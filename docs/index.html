@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VFit — Know What You Actually Burn</title>
+  <link rel="icon" type="image/png" href="screenshots/favicon.png" />
+  <meta name="description" content="VFit is an Android weight-loss tracker that works out your real daily energy expenditure from your own weight and food logs, and shows whether your metabolism is adapting." />
+  <style>
+    :root {
+      --navy:        #1F4E79;
+      --navy-dark:   #163A5B;
+      --navy-light:  #E6EEF7;
+      --orange:      #C55A11;
+      --text:        #1a1a1a;
+      --muted:       #555;
+      --border:      #ddd;
+      --bg:          #ffffff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.6;
+    }
+    a { color: var(--navy); }
+
+    /* ── NAV ── */
+    nav {
+      background: var(--navy);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 48px;
+    }
+    nav .logo { color: #fff; font-size: 1.2rem; font-weight: 700; letter-spacing: -0.5px;
+      display: flex; align-items: center; gap: 8px; }
+    nav .logo img { height: 30px; width: 30px; border-radius: 7px; box-shadow: 0 0 0 1px rgba(255,255,255,0.35); }
+    nav a { color: rgba(255,255,255,0.85); text-decoration: none; font-size: 0.9rem; }
+    nav a:hover { color: #fff; }
+
+    /* ── ABOVE FOLD: 2-COLUMN ── */
+    .above-fold {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 48px 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 48px;
+      align-items: start;
+    }
+    @media (max-width: 700px) {
+      .above-fold { grid-template-columns: 1fr; gap: 32px; padding: 32px 16px; }
+    }
+
+    /* Left: screenshot gif */
+    .screenshot-col { display: flex; justify-content: center; }
+    .screenshot-col img {
+      height: 600px;
+      max-width: 100%;
+      border-radius: 20px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+      object-fit: cover;
+    }
+    @media (max-width: 700px) {
+      .screenshot-col img { height: 480px; }
+    }
+
+    /* Right: name + features */
+    .features-col h1 {
+      font-size: 2.8rem;
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      color: var(--navy-dark);
+      margin-bottom: 8px;
+    }
+    .features-col h1 .flex { font-size: 0.85em; }
+    .features-col .tagline { font-size: 1.05rem; color: var(--muted); margin-bottom: 24px; }
+    .feature-list { list-style: none; margin-bottom: 32px; }
+    .feature-list li {
+      padding: 6px 0 6px 1.6em;
+      position: relative;
+      font-size: 0.95rem;
+    }
+    .feature-list li::before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      color: var(--orange);
+      font-weight: 700;
+    }
+    .feature-list li span { font-weight: 600; }
+    .feature-list li em { font-style: normal; color: var(--muted); }
+
+    .hero-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn {
+      display: inline-block;
+      background: var(--navy);
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.95rem;
+      padding: 10px 24px;
+      border-radius: 8px;
+      text-decoration: none;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-outline { background: transparent; color: var(--navy-dark); border: 2px solid var(--navy); }
+    .btn-outline:hover { background: var(--navy-light); opacity: 1; }
+
+    /* ── VIBE CODED BANNER ── */
+    .vibe-banner {
+      background: #fffbea;
+      border-top: 1px solid #f0e08a;
+      border-bottom: 1px solid #f0e08a;
+      text-align: center;
+      padding: 8px 24px;
+      font-size: 0.85rem;
+      color: #7a6500;
+    }
+    .vibe-banner a { color: #7a6500; }
+
+    /* ── SECTIONS ── */
+    section { max-width: 900px; margin: 0 auto; padding: 48px 24px; }
+    section + section { padding-top: 0; }
+    h2 { font-size: 1.4rem; font-weight: 700; margin-bottom: 20px; color: var(--navy-dark); }
+    section > p { margin-bottom: 14px; font-size: 0.95rem; }
+
+    /* ── DO NEXT ── */
+    .donext { display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; align-items: start; }
+    @media (max-width: 700px) { .donext { grid-template-columns: 1fr; } }
+    .donext figure { margin: 0; }
+    .donext img {
+      width: 100%;
+      border-radius: 14px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+    }
+    .donext figcaption { font-size: 0.88rem; color: var(--muted); margin-top: 10px; }
+    .donext figcaption strong { color: var(--text); }
+
+    /* ── HOW IT WORKS ── */
+    .how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    @media (max-width: 700px) { .how { grid-template-columns: 1fr; } }
+    .how div {
+      background: var(--navy-light);
+      border-radius: 12px;
+      padding: 18px;
+      font-size: 0.9rem;
+    }
+    .how strong { display: block; color: var(--navy-dark); margin-bottom: 6px; font-size: 1rem; }
+
+    /* ── INSTALL STEPS ── */
+    .steps { list-style: none; counter-reset: step; }
+    .steps li {
+      counter-increment: step;
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+      align-items: flex-start;
+    }
+    .steps li::before {
+      content: counter(step);
+      flex-shrink: 0;
+      width: 28px; height: 28px;
+      background: var(--navy);
+      color: #fff;
+      border-radius: 50%;
+      font-weight: 700;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .steps li div { padding-top: 2px; }
+    .steps li strong { display: block; margin-bottom: 2px; }
+    .steps li p { font-size: 0.9rem; color: var(--muted); }
+    code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+
+    /* ── ABOUT ── */
+    .vibe-section { background: var(--navy-light); border-radius: 12px; padding: 28px; }
+    .vibe-section p { color: var(--navy-dark); font-size: 0.95rem; margin-bottom: 10px; }
+    .vibe-section p:last-child { margin-bottom: 0; }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--border);
+      text-align: center;
+      padding: 24px;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    footer a { color: var(--navy); text-decoration: none; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="logo"><img src="screenshots/logo.png" alt="">VFit</span>
+  <a href="https://github.com/vinodkd/VFit">GitHub &rarr;</a>
+</nav>
+
+<div class="above-fold">
+  <!-- Left: animated screenshot GIF (synthetic demo data) -->
+  <div class="screenshot-col">
+    <img src="screenshots/demo.gif" alt="VFit in action: morning check-in, logging breakfast, Do next, and Trends with a chart being scrubbed">
+  </div>
+
+  <!-- Right: name, tagline, features, download -->
+  <div class="features-col">
+    <h1>VFit</h1>
+    <p class="tagline">A weight-loss tracker that works out what you actually burn &mdash; from your own scale and food log &mdash;
+      and tells you whether your metabolism is slowing down.</p>
+    <ul class="feature-list">
+      <li><span>Your real TDEE</span> <em>&mdash; learned from your weight trend and intake, not a generic formula</em></li>
+      <li><span>Metabolic adaptation</span> <em>&mdash; how much your burn has dropped beyond what the weight you lost explains</em></li>
+      <li><span>Do next</span> <em>&mdash; how you've managed so far, and one concrete change: eat this much less, walk this much more, or hold steady</em></li>
+      <li><span>Forecasts &amp; plateaus</span> <em>&mdash; where your weight will settle, 4/12/26-week projections, goal date, stall detection</em></li>
+      <li><span>Your day as a timeline</span> <em>&mdash; check-in, meals, snacks, exercise and 2-hour blood sugar, in order</em></li>
+      <li><span>Saved meals</span> <em>&mdash; search-as-you-type picker; log a usual meal in two taps</em></li>
+      <li><span>Fasting days</span> <em>&mdash; mark a fast and still log soups and juices</em></li>
+      <li><span>The year at a glance</span> <em>&mdash; every day coloured by what won: exercise, diet, fasting, or a day you lived a little &mdash; with targets, so you can see how much living is left</em></li>
+      <li><span>Trends you can scrub</span> <em>&mdash; status tiles and charts; slide a finger across any chart to read that day's values</em></li>
+      <li><span>Blood sugar &amp; blood pressure</span> <em>&mdash; fasting and post-meal glucose, BP and pulse alongside weight</em></li>
+      <li><span>Bring your spreadsheet</span> <em>&mdash; CSV import, and export of everything any time</em></li>
+      <li><span>100% local</span> <em>&mdash; no account, no sync, no tracking</em></li>
+    </ul>
+    <div class="hero-actions">
+      <a class="btn" href="https://github.com/vinodkd/VFit/releases/latest/download/vfit.apk">
+        &#x2B07; Download APK (Android)
+      </a>
+      <a class="btn btn-outline" href="#how">How it works</a>
+    </div>
+  </div>
+</div>
+
+<div class="vibe-banner">
+  &#x1F916; Code written by AI &mdash; intent and design by human &mdash; <a href="https://github.com/vinodkd/VFit">open source</a>
+</div>
+
+<section id="donext">
+  <h2>Do next: how you're doing, and what to change</h2>
+  <p>
+    Most trackers stop at charts. VFit's <em>Do next</em> tab tells you how to evaluate your health management so far
+    &mdash; and what to do about it.
+  </p>
+  <div class="donext">
+    <figure>
+      <img src="screenshots/year.png" alt="Year at a glance: counts of exercise, diet, fasted and lived days, days left against targets, and a calendar grid of the year">
+      <figcaption>
+        <strong>The year at a glance.</strong> Every day gets one colour for what won: a fasting day; a day you ate more
+        than you burned (lived); or a deficit that came mostly from exercise or mostly from diet. Set a target share
+        for each and it shows how many days of each are left &mdash; how much living you still have this year.
+        The year can start on 1 January or on the day you began.
+      </figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/next_step.png" alt="Next step card: eat about 700 kcal a day less, or move more, with the numbers behind it">
+      <figcaption>
+        <strong>One next step, with numbers.</strong> Compares what you've been eating with what your goal rate needs,
+        using your measured expenditure. If you've stalled, it says why it thinks so &mdash; deficit closed, water
+        masking fat loss, or not enough logging &mdash; and what to try: eat this much less, walk this much more,
+        or hold steady and re-check.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="how">
+  <h2>How it works</h2>
+  <p>
+    Calorie calculators guess your expenditure from age, height and weight. VFit measures it instead: if you logged
+    eating 2,000 kcal a day for a month and your weight trend held steady, you burn about 2,000 kcal a day
+    &mdash; in <em>your</em> logging units, so consistent under-logging is absorbed rather than throwing the numbers off.
+  </p>
+  <div class="how">
+    <div>
+      <strong>1. Log a little every day</strong>
+      Morning weight, what you ate (saved meals make it quick), and optionally waist, exercise, blood sugar and BP.
+      Missed a day? It's filled from the days around it and shown as assumed.
+    </div>
+    <div>
+      <strong>2. A filter separates signal from noise</strong>
+      A Kalman filter tracks your true weight through day-to-day water swings and learns your expenditure as it goes.
+      Each estimate uses only the data up to that day.
+    </div>
+    <div>
+      <strong>3. You get answers, not just graphs</strong>
+      Your TDEE with a confidence range, adaptation since you started, where you'll settle at current intake,
+      whether you've plateaued and the likely reason &mdash; and what to change.
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <h2>Installing the APK</h2>
+  <p style="color:var(--muted); font-size:0.9rem;">
+    VFit is not on the Google Play Store. Install it directly &mdash; this needs installs from unknown sources enabled.
+    Android 8.0 or newer.
+  </p>
+  <ol class="steps">
+    <li>
+      <div>
+        <strong>Download the APK</strong>
+        <p>Tap "Download APK" above, or get <code>vfit.apk</code> from the
+          <a href="https://github.com/vinodkd/VFit/releases/latest">Releases page</a>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Allow installs from unknown sources</strong>
+        <p>When prompted after opening the APK, tap <em>Settings</em> &rarr; enable <em>"Allow from this source"</em>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Open the APK and install</strong>
+        <p>Open the downloaded file from your notifications or Downloads folder. Tap <em>Install</em>.</p>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Set up and start logging</strong>
+        <p>In <em>Settings</em>, enter your height, age and goal. Log tomorrow morning's weight and your meals.
+          Estimates start after about three weeks; already have a spreadsheet? Use <em>Import CSV</em>.</p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <h2>About this app</h2>
+  <div class="vibe-section">
+    <p>
+      VFit is <strong>local only</strong>. Your weight, meals and health readings stay on your device.
+      No account required. No data leaves your phone. No analytics, no tracking, no ads.
+    </p>
+    <p>
+      It started as a spreadsheet and a Python script to answer one question during a weight-loss program:
+      is my metabolism slowing down more than the weight I've lost explains? The app runs the same model on your phone.
+    </p>
+    <p>
+      The code was written by <a href="https://claude.ai/code">Claude Code</a>.
+      The intent, design, and product decisions were made by a human.
+      The animation above uses made-up demo data.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <p>
+    VFit &mdash; open source, Android-first, vibe coded &mdash;
+    <a href="https://github.com/vinodkd/VFit">github.com/vinodkd/VFit</a>
+  </p>
+</footer>
+
+</body>
+</html>

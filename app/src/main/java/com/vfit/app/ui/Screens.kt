@@ -64,26 +64,67 @@ import java.time.LocalDate
 import java.util.Locale
 import kotlin.math.roundToInt
 
-// ------------------------------------------------------------------ Dashboard
+// ------------------------------------------------------------------ Do next
 
-private data class Tile(val label: String, val value: String, val sub: String, val color: Color, val spark: List<Double> = emptyList())
-
+/** How your health management has gone so far (the year card) and what to change next. */
 @Composable
-fun DashboardScreen(vm: AppViewModel) {
+fun DoNextScreen(vm: AppViewModel) {
     val model by vm.model.collectAsState()
     val settings by vm.settings.collectAsState()
-    val glucose by vm.glucose.collectAsState()
     val days by vm.days.collectAsState()
     val meals by vm.meals.collectAsState()
     val exercise by vm.exercise.collectAsState()
     val lifts by vm.lifts.collectAsState()
-    val u = Units(settings)
-    val ac = LocalAccents.current
-    var details by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Column {
+            Text("Do next", style = MaterialTheme.typography.headlineMedium)
+            Text("How you've managed so far, and what to change.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        val r = model
+        if (r == null) {
+            Text("No weights yet. Log one on Today, or import your data in Settings.")
+            return@Column
+        }
+        val today = LocalDate.now()
+        YearCard(yearStats(today, days.orEmpty(), meals, exercise, lifts, r, periodStart(today, settings.periodStart)), settings)
+        val step = nextStep(r, settings)
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("NEXT STEP", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(step.headline, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(step.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ Trends
+
+/** Status tiles, then the full charts, in one scrolling page. */
+@Composable
+fun TrendsScreen(vm: AppViewModel) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        TrendsSummary(vm)
+        TrendsCharts(vm)
+    }
+}
+
+private data class Tile(val label: String, val value: String, val sub: String, val color: Color, val spark: List<Double> = emptyList())
+
+@Composable
+private fun TrendsSummary(vm: AppViewModel) {
+    val model by vm.model.collectAsState()
+    val settings by vm.settings.collectAsState()
+    val glucose by vm.glucose.collectAsState()
+    val days by vm.days.collectAsState()
+    val u = Units(settings)
+    val ac = LocalAccents.current
+    var details by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         val r = model
         if (r == null) {
             Text("No weights yet. Log one on Today, or import your data in Settings.")
@@ -92,24 +133,13 @@ fun DashboardScreen(vm: AppViewModel) {
         val o = r.latest!!
         val recent = r.outputs.takeLast(90)
         Column {
-            Text("Dashboard", style = MaterialTheme.typography.headlineMedium)
+            Text("Trends", style = MaterialTheme.typography.headlineMedium)
             Text(
                 "As of ${o.date.format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM", Locale.US))}" +
                     (o.dataCoverage?.let { " · data coverage %.0f%%".format(Locale.US, it * 100) } ?: "") +
                     (o.tdeeConfidence?.let { " · TDEE confidence $it" } ?: ""),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-
-        YearCard(yearStats(LocalDate.now(), days.orEmpty(), meals, exercise, lifts, r))
-
-        val step = nextStep(r, settings)
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("NEXT STEP", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                Text(step.headline, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                Text(step.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
-            }
         }
 
         o.plateauFlag?.let { flag ->
@@ -185,34 +215,57 @@ fun DashboardScreen(vm: AppViewModel) {
     }
 }
 
-/** Year to date: each day coloured by what won (fasted / lived / exercise / diet), with counts. */
+/**
+ * The period so far (a year from 1 January or a chosen day): each day coloured by what won
+ * (fasted / lived / exercise / diet), with counts and, where targets are set, how many days of each are left.
+ */
 @Composable
-private fun YearCard(y: YearStats) {
+private fun YearCard(y: YearStats, s: AppSettings) {
     val ac = LocalAccents.current
+    data class Cat(val kind: DayKind, val label: String, val color: Color, val target: Double?)
     val cats = listOf(
-        Triple(DayKind.EXERCISE, "Exercise", ac.exercise),
-        Triple(DayKind.DIET, "Diet", ac.body),
-        Triple(DayKind.FASTED, "Fasted", ac.day),
-        Triple(DayKind.LIVED, "Lived", ac.meal),
+        Cat(DayKind.EXERCISE, "Exercise", ac.exercise, s.targetExercise),
+        Cat(DayKind.DIET, "Diet", ac.body, s.targetDiet),
+        Cat(DayKind.FASTED, "Fasted", ac.day, s.targetFasted),
+        Cat(DayKind.LIVED, "Lived", ac.meal, s.targetLived),
     )
-    val color = cats.associate { it.first to it.third }
+    val color = cats.associate { it.kind to it.color }
     val empty = MaterialTheme.colorScheme.surfaceContainerHighest
+    val fromJan1 = y.start.dayOfYear == 1
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("${y.start.year} so far · ${y.daysSoFar} days", style = MaterialTheme.typography.titleMedium)
+            Column {
+                Text(
+                    (if (fromJan1) "${y.start.year} so far" else "Since ${y.start.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", Locale.US))}") +
+                        " · ${y.daysSoFar} days",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                if (y.daysLeft > 0) Text("${y.daysLeft} days left in this year", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for ((k, label, c) in cats) Surface(
-                    modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), color = c.copy(alpha = 0.14f),
+                for (c in cats) Surface(
+                    modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), color = c.color.copy(alpha = 0.14f),
                 ) {
                     Column(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
-                        Text(label, style = MaterialTheme.typography.labelMedium, color = c, maxLines = 1)
-                        Text("${y.count(k)}", style = MaterialTheme.typography.titleLarge)
-                        Text("%.0f%%".format(Locale.US, 100.0 * y.count(k) / y.daysSoFar),
+                        Text(c.label, style = MaterialTheme.typography.labelMedium, color = c.color, maxLines = 1)
+                        Text("${y.count(c.kind)}", style = MaterialTheme.typography.titleLarge)
+                        Text("%.0f%%".format(Locale.US, 100.0 * y.count(c.kind) / y.daysSoFar),
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        c.target?.let { t ->
+                            val left = y.left(c.kind, t)
+                            Text(
+                                if (left >= 0) "$left left" else "${-left} over",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (left >= 0) c.color else MaterialTheme.colorScheme.error,
+                            )
+                            Text("of %.0f%%".format(Locale.US, t), style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             }
-            // calendar: one column per week (Mon-Sun), from the week of 1 January to this week
+            // calendar: one column per week (Mon-Sun), from the week the period starts to this week
             val firstMonday = y.start.minusDays((y.start.dayOfWeek.value - 1).toLong())
             val weeks = ((y.end.toEpochDay() - firstMonday.toEpochDay()) / 7 + 1).toInt()
             Canvas(Modifier.fillMaxWidth().aspectRatio(weeks / 7f)) {
@@ -231,7 +284,8 @@ private fun YearCard(y: YearStats) {
             }
             Text(
                 "Each day shows what won: fasted; else lived (ate more than TDEE); else the deficit came mostly from " +
-                    "exercise or from diet. Grey: not enough data.",
+                    "exercise or from diet. Grey: not enough data." +
+                    if (cats.none { it.target != null }) " Set targets in Settings to see how many days of each are left." else "",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -273,7 +327,7 @@ private fun SectionCard(sec: SummarySection) {
 
 
 @Composable
-fun ChartsScreen(vm: AppViewModel) {
+private fun TrendsCharts(vm: AppViewModel) {
     val model by vm.model.collectAsState()
     val settings by vm.settings.collectAsState()
     val glucose by vm.glucose.collectAsState()
@@ -283,8 +337,7 @@ fun ChartsScreen(vm: AppViewModel) {
     val ac = LocalAccents.current
     val BLUE = ac.body; val ORANGE = ac.meal; val GREEN = ac.exercise; val RED = ac.glucose; val PURPLE = ac.day; val TEAL = ac.body
     val GREY = MaterialTheme.colorScheme.outline
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
-        Text("Charts", style = MaterialTheme.typography.headlineMedium)
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         val r = model
         if (r == null) {
             Text("No data yet.")
@@ -491,6 +544,9 @@ private fun SettingsForm(s: AppSettings, onSave: (AppSettings) -> Unit) {
                 "heavy" to u.field(s.offsetHeavy, 0),
                 "ref" to (s.adaptationRefDate?.toString() ?: ""),
                 "assumed" to u.field(s.assumedIntake, 0),
+                "period" to (s.periodStart?.toString() ?: ""),
+                "t_ex" to u.field(s.targetExercise, 0), "t_diet" to u.field(s.targetDiet, 0),
+                "t_fast" to u.field(s.targetFasted, 0), "t_lived" to u.field(s.targetLived, 0),
             )
         )
     }
@@ -515,6 +571,20 @@ private fun SettingsForm(s: AppSettings, onSave: (AppSettings) -> Unit) {
             }
             OutlinedTextField(v("ref"), { set("ref", it) }, label = { Text("Adaptation reference date (YYYY-MM-DD, blank = first TDEE day)") },
                 singleLine = true, modifier = Modifier.fillMaxWidth())
+            Text("Do next: year at a glance", style = MaterialTheme.typography.labelLarge)
+            OutlinedTextField(v("period"), { set("period", it) }, label = { Text("Year starts on (YYYY-MM-DD, blank = 1 January)") },
+                singleLine = true, modifier = Modifier.fillMaxWidth())
+            Text("Target share of days (%), blank = no target", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                NumField("Exercise", v("t_ex"), Modifier.weight(1f)) { set("t_ex", it) }
+                NumField("Diet", v("t_diet"), Modifier.weight(1f)) { set("t_diet", it) }
+                NumField("Fasted", v("t_fast"), Modifier.weight(1f)) { set("t_fast", it) }
+                NumField("Lived", v("t_lived"), Modifier.weight(1f)) { set("t_lived", it) }
+            }
+            val totalTarget = listOf("t_ex", "t_diet", "t_fast", "t_lived").sumOf { parseNum(v(it)) ?: 0.0 }
+            if (totalTarget > 100) Text("Targets add up to %.0f%%, more than 100%%.".format(Locale.US, totalTarget),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             NumField("Assumed intake on days with nothing logged", v("assumed"), Modifier.fillMaxWidth(), suffix = "kcal") { set("assumed", it) }
             Text("Used when there's no logged day within a week on both sides to interpolate from.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -545,6 +615,9 @@ private fun SettingsForm(s: AppSettings, onSave: (AppSettings) -> Unit) {
                         offsetModerate = parseNum(v("mod")) ?: s.offsetModerate,
                         offsetHeavy = parseNum(v("heavy")) ?: s.offsetHeavy,
                         assumedIntake = parseNum(v("assumed")) ?: s.assumedIntake,
+                        periodStart = v("period").trim().takeIf { it.isNotEmpty() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+                        targetExercise = parseNum(v("t_ex")), targetDiet = parseNum(v("t_diet")),
+                        targetFasted = parseNum(v("t_fast")), targetLived = parseNum(v("t_lived")),
                         adaptationRefDate = v("ref").trim().takeIf { it.isNotEmpty() }
                             ?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
                     )
