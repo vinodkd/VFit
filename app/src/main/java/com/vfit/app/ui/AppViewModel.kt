@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -40,7 +41,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val glucose: StateFlow<List<GlucoseReading>> = repo.glucose.state(emptyList())
     val exercise: StateFlow<List<ExerciseEntry>> = repo.exercise.state(emptyList())
     val settings: StateFlow<AppSettings> = repo.settings.state(AppSettings())
-    val model: StateFlow<ModelResult?> = repo.model.state(null)
+    private val computed = repo.computed.state(null)
+    val model: StateFlow<ModelResult?> = computed.map { it?.result }.state(null)
+    /** Days whose intake was assumed or interpolated because nothing was logged. */
+    val assumedDays: StateFlow<Set<LocalDate>> = computed.map { it?.assumed.orEmpty() }.state(emptySet())
 
     private val _date = MutableStateFlow(LocalDate.now())
     val date = _date.asStateFlow()
@@ -87,9 +91,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Saves the morning check-in: body fields, and the fasting glucose reading (blank removes it). */
-    fun saveMorning(date: LocalDate, weight: Double?, waist: Double?, grip: Double?, fastingMgdl: Double?, existing: GlucoseReading?) = io {
+    fun saveMorning(
+        date: LocalDate, weight: Double?, waist: Double?, grip: Double?, fastingMgdl: Double?, existing: GlucoseReading?,
+        bpSys: Double?, bpDia: Double?, pulse: Double?,
+    ) = io {
         val e = date.toEpochDay()
-        repo.saveDay((repo.day(e) ?: DayEntry(e)).copy(weight = weight, waist = waist, grip = grip))
+        repo.saveDay((repo.day(e) ?: DayEntry(e)).copy(weight = weight, waist = waist, grip = grip, bpSys = bpSys, bpDia = bpDia, pulse = pulse))
         when {
             fastingMgdl != null -> repo.saveGlucose(
                 existing?.copy(value = fastingMgdl)
@@ -106,6 +113,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteGlucose(id: Long) = io { repo.deleteGlucose(id) }
     fun saveExercise(e: ExerciseEntry) = io { repo.saveExercise(e) }
     fun deleteExercise(id: Long) = io { repo.deleteExercise(id) }
+
+    fun setFasting(date: LocalDate, fasting: Boolean) = io {
+        val e = date.toEpochDay()
+        repo.saveDay((repo.day(e) ?: DayEntry(e)).copy(fasting = fasting))
+    }
 
     /** Saves activity without touching other fields of the day (so unsaved body edits aren't lost). */
     fun setActivity(date: LocalDate, activity: Int?) = io {

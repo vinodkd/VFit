@@ -28,6 +28,12 @@ data class DayEntry(
     /** Used instead of the sum of meal entries when set (imported totals, quick totals). */
     val caloriesOverride: Int? = null,
     val note: String? = null,
+    /** Fasting day (v4). Meals can still be logged (soups etc.); this only marks the day. */
+    @ColumnInfo(defaultValue = "0") val fasting: Boolean = false,
+    /** Blood pressure (mmHg) and pulse (bpm), v5. */
+    val bpSys: Double? = null,
+    val bpDia: Double? = null,
+    val pulse: Double? = null,
 )
 
 @Entity(tableName = "meal_template")
@@ -87,6 +93,8 @@ data class GlucoseReading(
     val kind: Int,
     val mealEntryId: Long? = null,
     val value: Double,
+    /** Meal slot a post-meal reading follows (v5); lets imported readings sit in a slot without a logged meal. */
+    val slot: Int? = null,
 )
 
 @Entity(tableName = "setting")
@@ -125,6 +133,8 @@ interface VFitDao {
     @Query("DELETE FROM meal_entry WHERE id = :id") suspend fun deleteMeal(id: Long)
     @Query("DELETE FROM glucose_reading WHERE mealEntryId = :mealId") suspend fun deleteGlucoseForMeal(mealId: Long)
     @Query("DELETE FROM glucose_reading WHERE id = :id") suspend fun deleteGlucose(id: Long)
+    @Query("DELETE FROM glucose_reading WHERE date IN (:dates)") suspend fun deleteGlucoseOn(dates: List<Long>)
+    @Upsert suspend fun upsertGlucoseList(g: List<GlucoseReading>)
     @Query("DELETE FROM lift_set WHERE date = :date AND lift = :lift") suspend fun deleteLift(date: Long, lift: String)
     @Query("DELETE FROM meal_template WHERE id = :id") suspend fun deleteTemplate(id: Long)
 
@@ -138,7 +148,7 @@ interface VFitDao {
 @Database(
     entities = [DayEntry::class, MealTemplate::class, MealEntry::class, LiftSet::class, GlucoseReading::class, SettingRow::class,
         ExerciseEntry::class],
-    version = 3,
+    version = 5,
     exportSchema = false,
 )
 abstract class VFitDb : RoomDatabase() {
@@ -146,7 +156,7 @@ abstract class VFitDb : RoomDatabase() {
 
     companion object {
         fun open(context: Context): VFitDb =
-            Room.databaseBuilder(context, VFitDb::class.java, "vfit.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+            Room.databaseBuilder(context, VFitDb::class.java, "vfit.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
 
         /** v2: meal timeline slots and exercise entries. */
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -164,6 +174,24 @@ abstract class VFitDb : RoomDatabase() {
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE lift_set ADD COLUMN slot INTEGER NOT NULL DEFAULT 6")
+            }
+        }
+
+        /** v4: fasting days. */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE day_entry ADD COLUMN fasting INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /** v5: blood pressure and pulse; slot on glucose readings (existing post-meal readings take their meal's slot). */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE day_entry ADD COLUMN bpSys REAL")
+                db.execSQL("ALTER TABLE day_entry ADD COLUMN bpDia REAL")
+                db.execSQL("ALTER TABLE day_entry ADD COLUMN pulse REAL")
+                db.execSQL("ALTER TABLE glucose_reading ADD COLUMN slot INTEGER")
+                db.execSQL("UPDATE glucose_reading SET slot = (SELECT m.slot FROM meal_entry m WHERE m.id = glucose_reading.mealEntryId) WHERE mealEntryId IS NOT NULL")
             }
         }
     }

@@ -1,6 +1,14 @@
 package com.vfit.app.ui
 
 import android.net.Uri
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -65,6 +73,10 @@ fun DashboardScreen(vm: AppViewModel) {
     val model by vm.model.collectAsState()
     val settings by vm.settings.collectAsState()
     val glucose by vm.glucose.collectAsState()
+    val days by vm.days.collectAsState()
+    val meals by vm.meals.collectAsState()
+    val exercise by vm.exercise.collectAsState()
+    val lifts by vm.lifts.collectAsState()
     val u = Units(settings)
     val ac = LocalAccents.current
     var details by remember { mutableStateOf(false) }
@@ -88,6 +100,8 @@ fun DashboardScreen(vm: AppViewModel) {
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+
+        YearCard(yearStats(LocalDate.now(), days.orEmpty(), meals, exercise, lifts, r))
 
         val step = nextStep(r, settings)
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
@@ -135,9 +149,25 @@ fun DashboardScreen(vm: AppViewModel) {
                 (o.waistTrend?.let { "${u.len}/week" } ?: "needs 3 readings in 4 weeks") +
                     (o.waistPerWtLost?.let { " · %.2f %s per %s lost".format(Locale.US, u.lenOut(u.wIn(it)), u.len, u.w) } ?: ""),
                 ac.body, r.waist.toList().takeLast(90)))
+            val bySlot = g7.filter { it.kind == GLUCOSE_POST_MEAL }.groupBy { it.slot }
+            fun slotAvg(slot: com.vfit.app.data.Slot) = bySlot[slot.id]?.map { it.value }?.average()?.let { "%.0f".format(Locale.US, u.gluOut(it)) }
+            val post = listOfNotNull(
+                slotAvg(com.vfit.app.data.Slot.BREAKFAST)?.let { "breakfast $it" },
+                slotAvg(com.vfit.app.data.Slot.LUNCH)?.let { "lunch $it" },
+                slotAvg(com.vfit.app.data.Slot.DINNER)?.let { "dinner $it" },
+            )
             add(Tile("Fasting glucose (7 d)", gAvg(GLUCOSE_FASTING)?.let { u.glucose(it) } ?: "—",
-                gAvg(GLUCOSE_POST_MEAL)?.let { "2 h after meals: ${u.glucose(it)}" } ?: "no post-meal readings this week",
+                if (post.isEmpty()) "no post-meal readings this week" else "2 h after: " + post.joinToString(" · "),
                 ac.glucose, fasting.takeLast(30).map { u.gluOut(it.value) }))
+            val bp = days.orEmpty().filter { it.bpSys != null && it.bpDia != null }
+            bp.lastOrNull()?.let { last ->
+                val month = bp.filter { it.date >= LocalDate.now().minusDays(29).toEpochDay() }
+                add(Tile("Blood pressure", "%.0f/%.0f".format(Locale.US, last.bpSys, last.bpDia),
+                    "on ${LocalDate.ofEpochDay(last.date).format(java.time.format.DateTimeFormatter.ofPattern("d MMM", Locale.US))}" +
+                        (last.pulse?.let { " · pulse %.0f".format(Locale.US, it) } ?: "") +
+                        (if (month.size > 1) " · 30-day avg %.0f/%.0f".format(Locale.US, month.map { it.bpSys!! }.average(), month.map { it.bpDia!! }.average()) else ""),
+                    ac.day, bp.takeLast(30).map { it.bpSys!! }))
+            }
             o.strengthIndex?.let { si ->
                 add(Tile("Strength", "%+.1f%%".format(Locale.US, si * 100), o.strengthFlag ?: "vs baseline, 28-day window",
                     ac.exercise, r.strength.toList().takeLast(90).map { it * 100 }))
@@ -152,6 +182,59 @@ fun DashboardScreen(vm: AppViewModel) {
 
         TextButton(onClick = { details = !details }) { Text(if (details) "Hide details" else "Show details") }
         if (details) for (sec in summarize(r, settings)) SectionCard(sec)
+    }
+}
+
+/** Year to date: each day coloured by what won (fasted / lived / exercise / diet), with counts. */
+@Composable
+private fun YearCard(y: YearStats) {
+    val ac = LocalAccents.current
+    val cats = listOf(
+        Triple(DayKind.EXERCISE, "Exercise", ac.exercise),
+        Triple(DayKind.DIET, "Diet", ac.body),
+        Triple(DayKind.FASTED, "Fasted", ac.day),
+        Triple(DayKind.LIVED, "Lived", ac.meal),
+    )
+    val color = cats.associate { it.first to it.third }
+    val empty = MaterialTheme.colorScheme.surfaceContainerHighest
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("${y.start.year} so far · ${y.daysSoFar} days", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for ((k, label, c) in cats) Surface(
+                    modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), color = c.copy(alpha = 0.14f),
+                ) {
+                    Column(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+                        Text(label, style = MaterialTheme.typography.labelMedium, color = c, maxLines = 1)
+                        Text("${y.count(k)}", style = MaterialTheme.typography.titleLarge)
+                        Text("%.0f%%".format(Locale.US, 100.0 * y.count(k) / y.daysSoFar),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            // calendar: one column per week (Mon-Sun), from the week of 1 January to this week
+            val firstMonday = y.start.minusDays((y.start.dayOfWeek.value - 1).toLong())
+            val weeks = ((y.end.toEpochDay() - firstMonday.toEpochDay()) / 7 + 1).toInt()
+            Canvas(Modifier.fillMaxWidth().aspectRatio(weeks / 7f)) {
+                val cell = size.width / weeks
+                val gap = cell * 0.18f
+                for (w in 0 until weeks) for (dow in 0 until 7) {
+                    val d = firstMonday.plusDays((w * 7 + dow).toLong())
+                    if (d.isBefore(y.start) || d.isAfter(y.end)) continue
+                    drawRoundRect(
+                        y.kinds[d]?.let { color[it] } ?: empty,
+                        topLeft = Offset(w * cell + gap / 2, dow * cell + gap / 2),
+                        size = Size(cell - gap, cell - gap),
+                        cornerRadius = CornerRadius(cell * 0.2f),
+                    )
+                }
+            }
+            Text(
+                "Each day shows what won: fasted; else lived (ate more than TDEE); else the deficit came mostly from " +
+                    "exercise or from diet. Grey: not enough data.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -194,6 +277,8 @@ fun ChartsScreen(vm: AppViewModel) {
     val model by vm.model.collectAsState()
     val settings by vm.settings.collectAsState()
     val glucose by vm.glucose.collectAsState()
+    val assumed by vm.assumedDays.collectAsState()
+    val days by vm.days.collectAsState()
     val u = Units(settings)
     val ac = LocalAccents.current
     val BLUE = ac.body; val ORANGE = ac.meal; val GREEN = ac.exercise; val RED = ac.glucose; val PURPLE = ac.day; val TEAL = ac.body
@@ -230,7 +315,10 @@ fun ChartsScreen(vm: AppViewModel) {
             LineChart(
                 "Estimated TDEE vs intake", "kcal/day",
                 listOf(
-                    Series.Dots("Daily intake", ORANGE.copy(alpha = 0.45f), xDays, r.calories.toList()),
+                    Series.Dots("Logged intake", ORANGE.copy(alpha = 0.55f), xDays,
+                        r.calories.toList().mapIndexed { i, v -> if (r.dates[i] in assumed) Double.NaN else v }),
+                    Series.Dots("Assumed (not logged)", GREY.copy(alpha = 0.6f), xDays,
+                        r.calories.toList().mapIndexed { i, v -> if (r.dates[i] in assumed) v else Double.NaN }),
                     Series.Line("Intake, 14-day avg", ORANGE, outX, r.outputs.map { it.intakeAvg14d ?: nan }),
                     Series.Band("TDEE 80% range", BLUE, tdeeX.map { it.date.toEpochDay().toDouble() }, tdeeX.map { it.tdeeLow!! }, tdeeX.map { it.tdeeHigh!! }),
                     Series.Line("Estimated TDEE", BLUE, tdeeX.map { it.date.toEpochDay().toDouble() }, tdeeX.map { it.tdeeEst!! }),
@@ -260,6 +348,21 @@ fun ChartsScreen(vm: AppViewModel) {
             }
         }
         HorizontalDivider()
+
+        // blood pressure
+        val bp = days.orEmpty().filter { it.bpSys != null || it.pulse != null }
+        if (bp.isNotEmpty()) {
+            val bx = bp.map { it.date.toDouble() }
+            LineChart(
+                "Blood pressure and pulse", "mmHg · bpm",
+                listOf(
+                    Series.Dots("Upper (systolic)", PURPLE, bx, bp.map { it.bpSys ?: Double.NaN }),
+                    Series.Dots("Lower (diastolic)", BLUE, bx, bp.map { it.bpDia ?: Double.NaN }),
+                    Series.Dots("Pulse", GREY, bx, bp.map { it.pulse ?: Double.NaN }),
+                ),
+            )
+            HorizontalDivider()
+        }
 
         // 5. glucose
         if (glucose.isNotEmpty()) {
@@ -387,6 +490,7 @@ private fun SettingsForm(s: AppSettings, onSave: (AppSettings) -> Unit) {
                 "mod" to u.field(s.offsetModerate, 0),
                 "heavy" to u.field(s.offsetHeavy, 0),
                 "ref" to (s.adaptationRefDate?.toString() ?: ""),
+                "assumed" to u.field(s.assumedIntake, 0),
             )
         )
     }
@@ -411,6 +515,9 @@ private fun SettingsForm(s: AppSettings, onSave: (AppSettings) -> Unit) {
             }
             OutlinedTextField(v("ref"), { set("ref", it) }, label = { Text("Adaptation reference date (YYYY-MM-DD, blank = first TDEE day)") },
                 singleLine = true, modifier = Modifier.fillMaxWidth())
+            NumField("Assumed intake on days with nothing logged", v("assumed"), Modifier.fillMaxWidth(), suffix = "kcal") { set("assumed", it) }
+            Text("Used when there's no logged day within a week on both sides to interpolate from.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Model constants", style = MaterialTheme.typography.labelLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 NumField("b (kcal/kg)", v("b"), Modifier.weight(1f)) { set("b", it) }
@@ -437,6 +544,7 @@ private fun SettingsForm(s: AppSettings, onSave: (AppSettings) -> Unit) {
                         offsetSedentary = parseNum(v("sed")) ?: s.offsetSedentary,
                         offsetModerate = parseNum(v("mod")) ?: s.offsetModerate,
                         offsetHeavy = parseNum(v("heavy")) ?: s.offsetHeavy,
+                        assumedIntake = parseNum(v("assumed")) ?: s.assumedIntake,
                         adaptationRefDate = v("ref").trim().takeIf { it.isNotEmpty() }
                             ?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
                     )

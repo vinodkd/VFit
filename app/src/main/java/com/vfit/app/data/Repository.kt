@@ -24,9 +24,13 @@ class Repository(private val db: VFitDb) {
     val exercise = dao.exercise()
     val settings: Flow<AppSettings> = dao.settings().map { rows -> AppSettings.fromMap(rows.associate { it.key to it.value }) }
 
+    /** Model output plus the days whose intake was assumed (not logged). */
+    data class Computed(val result: ModelResult?, val assumed: Set<LocalDate>)
+
     /** Full recompute on every change; cheap (5x5 filter, one step per day). */
-    val model: Flow<ModelResult?> = combine(days, meals, lifts, settings) { d, m, l, s ->
-        Model.compute(buildInputs(d, m, l), s.toModelConfig())
+    val computed: Flow<Computed> = combine(days, meals, lifts, settings) { d, m, l, s ->
+        val (inputs, assumed) = fillGaps(buildInputs(d, m, l), d.filter { it.fasting }.map { it.date }.toSet(), LocalDate.now(), s.assumedIntake)
+        Computed(Model.compute(inputs, s.toModelConfig()), assumed)
     }.flowOn(Dispatchers.Default)
 
     suspend fun saveDay(d: DayEntry) = dao.upsertDay(d)
@@ -45,29 +49,65 @@ class Repository(private val db: VFitDb) {
 
     // ------------------------------------------------------------------ import / export
 
-    /** Imports inputs.csv or config.csv as written by `tdee_tracker.py export-csv` (or by [exportFiles]). */
+    /**
+     * Imports a CSV by its header: config.csv (settings), glucose.csv (has mg_dl), or inputs.csv
+     * (from `tdee_tracker.py export-csv` / `vital-to-csv`, or a VFit export).
+     * The file is treated as the source for the dates it covers: every column it has overwrites those days
+     * (a blank cell clears the value); columns it doesn't have are left alone.
+     */
     suspend fun importCsv(text: String): String {
-        val (header, _) = GoldenIo.parseCsv(text)
-        if (header.firstOrNull()?.trim() == "setting") {
+        val (header, body) = GoldenIo.parseCsv(text)
+        val h = header.map { it.trim() }
+        if (h.firstOrNull() == "setting") {
             val current = AppSettings.fromMap(dao.allSettings().associate { it.key to it.value }).toMap()
             saveSettings(AppSettings.fromMap(current + GoldenIo.parseConfig(text)))
             return "Imported settings."
         }
-        if ("date" !in header.map { it.trim() }) return "Not a VFit/tdee_tracker CSV (no 'date' column)."
-        val rows = GoldenIo.parseInputs(text)
+        if ("date" !in h) return "Not a VFit/tdee_tracker CSV (no 'date' column)."
+        val col = h.withIndex().associate { it.value to it.index }
+        fun date(r: List<String>) = runCatching { LocalDate.parse(r[col["date"]!!].trim().take(10)).toEpochDay() }.getOrNull()
+        /** null = column absent (keep existing); "" = blank cell (clear). */
+        fun cell(r: List<String>, name: String): String? = col[name]?.let { r.getOrNull(it)?.trim() ?: "" }
+        fun num(r: List<String>, name: String, old: Double?) = cell(r, name)?.toDoubleOrNull() ?: if (cell(r, name) == null) old else null
+
+        if ("mg_dl" in col) {
+            val readings = body.mapNotNull { r ->
+                val e = date(r) ?: return@mapNotNull null
+                val v = cell(r, "mg_dl")?.toDoubleOrNull() ?: return@mapNotNull null
+                val t = cell(r, "time")?.split(":")?.let { (it[0].toIntOrNull() ?: 0) * 60 + (it.getOrNull(1)?.toIntOrNull() ?: 0) } ?: 0
+                val kind = if (cell(r, "kind")?.startsWith("fast") == true) GLUCOSE_FASTING else GLUCOSE_POST_MEAL
+                GlucoseReading(date = e, time = t, kind = kind, value = v, slot = cell(r, "slot")?.toIntOrNull())
+            }
+            dao.deleteGlucoseOn(readings.map { it.date }.distinct())
+            dao.upsertGlucoseList(readings)
+            return "Imported ${readings.size} glucose readings."
+        }
+
         val existing = dao.allDays().associateBy { it.date }
-        val days = rows.map { r ->
-            val e = r.date.toEpochDay()
-            (existing[e] ?: DayEntry(e)).copy(
-                weight = r.weightKg ?: existing[e]?.weight,
-                waist = r.waistCm ?: existing[e]?.waist,
-                activity = r.activity.takeIf { it != UNKNOWN } ?: existing[e]?.activity,
-                grip = r.grip ?: existing[e]?.grip,
-                caloriesOverride = r.calories?.roundToInt() ?: existing[e]?.caloriesOverride,
+        val act = mapOf("sedentary" to 0, "light" to 1, "moderate" to 2, "heavy" to 3)
+        val days = body.mapNotNull { r ->
+            val e = date(r) ?: return@mapNotNull null
+            val old = existing[e] ?: DayEntry(e)
+            val cal = num(r, "calories", old.caloriesOverride?.toDouble())
+            old.copy(
+                weight = num(r, "weight_kg", old.weight),
+                waist = num(r, "waist_cm", old.waist),
+                activity = cell(r, "activity")?.let { a -> act.entries.firstOrNull { a.lowercase().startsWith(it.key.take(3)) }?.value } ?: old.activity.takeIf { cell(r, "activity") == null },
+                grip = num(r, "grip", old.grip),
+                caloriesOverride = cal?.roundToInt(),
+                // a 0 kcal day is a fasting day
+                fasting = (cell(r, "fasting")?.let { it == "1" } ?: old.fasting) || cal == 0.0,
+                bpSys = num(r, "bp_sys", old.bpSys),
+                bpDia = num(r, "bp_dia", old.bpDia),
+                pulse = num(r, "pulse", old.pulse),
             )
         }
         dao.upsertDays(days)
-        dao.upsertLifts(rows.flatMap { r -> r.e1rm.map { (l, v) -> LiftSet(r.date.toEpochDay(), l, v, 1) } })
+        val lifts = h.filter { it.startsWith("e1rm_") }
+        dao.upsertLifts(body.flatMap { r ->
+            val e = date(r) ?: return@flatMap emptyList()
+            lifts.mapNotNull { l -> cell(r, l)?.toDoubleOrNull()?.let { LiftSet(e, l.removePrefix("e1rm_"), it, 1) } }
+        })
         return "Imported ${days.size} days."
     }
 
@@ -80,10 +120,14 @@ class Repository(private val db: VFitDb) {
         val liftNames = lifts.map { it.lift }.distinct().sorted()
         val act = listOf("sedentary", "light", "moderate", "heavy")
         val inputsCsv = buildString {
-            appendLine((listOf("date", "weight_kg", "waist_cm", "calories", "activity", "grip") + liftNames.map { "e1rm_$it" }).joinToString(","))
+            appendLine((listOf("date", "weight_kg", "waist_cm", "calories", "activity", "grip") + liftNames.map { "e1rm_$it" } +
+                listOf("fasting", "bp_sys", "bp_dia", "pulse")).joinToString(","))
+            val dayMap = days.associateBy { it.date }
             for (r in inputs) {
+                val d = dayMap[r.date.toEpochDay()]
                 appendLine((listOf(r.date.toString(), s(r.weightKg), s(r.waistCm), s(r.calories),
-                    act.getOrElse(r.activity) { "" }, s(r.grip)) + liftNames.map { s(r.e1rm[it]) }).joinToString(","))
+                    act.getOrElse(r.activity) { "" }, s(r.grip)) + liftNames.map { s(r.e1rm[it]) } +
+                    listOf(if (d?.fasting == true) "1" else "", s(d?.bpSys), s(d?.bpDia), s(d?.pulse))).joinToString(","))
             }
         }
         val settings = AppSettings.fromMap(dao.allSettings().associate { it.key to it.value })
@@ -100,11 +144,11 @@ class Repository(private val db: VFitDb) {
             for (e in dao.allExercise()) appendLine("${LocalDate.ofEpochDay(e.date)},${Slot.of(e.slot)?.label ?: ""},${q(e.description)},${e.minutes ?: ""}")
         }
         val glucoseCsv = buildString {
-            appendLine("date,time,kind,meal,mg_dl")
+            appendLine("date,time,kind,slot,meal,mg_dl")
             val byId = meals.associateBy { it.id }
             for (g in dao.allGlucose()) appendLine(
                 "${LocalDate.ofEpochDay(g.date)},${hhmm(g.time)},${if (g.kind == GLUCOSE_FASTING) "fasting" else "2h_post_meal"}," +
-                    "${q(g.mealEntryId?.let { byId[it]?.name } ?: "")},${g.value}"
+                    "${g.slot ?: g.mealEntryId?.let { byId[it]?.slot } ?: ""},${q(g.mealEntryId?.let { byId[it]?.name } ?: "")},${g.value}"
             )
         }
         return linkedMapOf("inputs.csv" to inputsCsv, "config.csv" to configCsv, "meals.csv" to mealsCsv, "glucose.csv" to glucoseCsv,
@@ -117,9 +161,41 @@ class Repository(private val db: VFitDb) {
     companion object {
         fun hhmm(minutes: Int) = "%02d:%02d".format(minutes / 60, minutes % 60)
 
-        /** Daily calories = override if set, else sum of meal kcal x quantity; null if neither. */
+        /** Daily calories = override if set, else sum of meal kcal x quantity; 0 on a fasting day with nothing logged; else null. */
         fun dayCalories(day: DayEntry?, meals: List<MealEntry>): Double? =
             day?.caloriesOverride?.toDouble() ?: meals.takeIf { it.isNotEmpty() }?.sumOf { it.kcal * it.quantity }
+                ?: if (day?.fasting == true) 0.0 else null
+
+        /**
+         * Fills intake on past days with nothing logged (not today, not fasting days): interpolates between the nearest
+         * logged non-fasting days if both are within a week, otherwise assumes [assumed] kcal. Returns the filled inputs
+         * and the dates that were filled.
+         */
+        fun fillGaps(inputs: List<DayInput>, fasting: Set<Long>, today: LocalDate, assumed: Double): Pair<List<DayInput>, Set<LocalDate>> {
+            if (inputs.isEmpty()) return inputs to emptySet()
+            val byDate = inputs.associateBy { it.date }
+            val logged = inputs.filter { it.calories != null && it.date.toEpochDay() !in fasting }
+                .associate { it.date.toEpochDay() to it.calories!! }.toSortedMap()
+            val first = inputs.first().date
+            val last = minOf(inputs.last().date, today.minusDays(1))
+            val filled = ArrayList<DayInput>()
+            val assumedDays = HashSet<LocalDate>()
+            var d = first
+            while (!d.isAfter(inputs.last().date)) {
+                val e = d.toEpochDay()
+                val r = byDate[d]
+                if ((r == null || r.calories == null) && !d.isAfter(last) && e !in fasting) {
+                    val prev = logged.headMap(e).let { if (it.isEmpty()) null else it.lastKey() }?.takeIf { e - it <= 7 }
+                    val next = logged.tailMap(e + 1).let { if (it.isEmpty()) null else it.firstKey() }?.takeIf { it - e <= 7 }
+                    val kcal = if (prev != null && next != null)
+                        logged[prev]!! + (logged[next]!! - logged[prev]!!) * (e - prev).toDouble() / (next - prev) else assumed
+                    filled += (r ?: DayInput(d)).copy(calories = kcal)
+                    assumedDays += d
+                } else if (r != null) filled += r
+                d = d.plusDays(1)
+            }
+            return filled to assumedDays
+        }
 
         fun buildInputs(days: List<DayEntry>, meals: List<MealEntry>, lifts: List<LiftSet>): List<DayInput> {
             val dayMap = days.associateBy { it.date }

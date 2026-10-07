@@ -34,7 +34,7 @@ data class ModelConfig(
     val adaptationRefDate: LocalDate? = null,
 )
 
-/** One calendar day of inputs. Calories or weight of 0 count as missing, as in the script. */
+/** One calendar day of inputs. Weight of 0 counts as missing; calories of 0 is a real (fasting) intake, as in the script. */
 data class DayInput(
     val date: LocalDate,
     val weightKg: Double? = null,
@@ -122,7 +122,7 @@ object Model {
             val r = byDate[dates[i]] ?: continue
             r.weightKg?.let { if (it != 0.0) W[i] = it }
             r.waistCm?.let { if (it != 0.0) WA[i] = it }
-            r.calories?.let { if (it != 0.0) CAL[i] = it }
+            r.calories?.let { CAL[i] = it }                 // 0 is a real intake (fasting); null = not logged
             ACT[i] = r.activity
             r.grip?.let { if (it != 0.0) meas["grip"]!![i] = it }
             for ((l, v) in r.e1rm) meas["lift:$l"]!![i] = v

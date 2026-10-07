@@ -42,6 +42,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -107,6 +108,7 @@ fun TodayScreen(vm: AppViewModel, onManageMeals: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
         DateBar(date, vm::selectDate)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 12.dp)) {
+            if (entry?.fasting == true) StatPill("Fasting", "today")
             StatPill("Eaten", total?.let { "${it.roundToInt()} kcal" } ?: "—")
             out?.let { StatPill("Trend", u.weight(it.trendWeight)) }
             out?.tdeeEst?.let { StatPill("TDEE", "${kcal(it)} kcal") }
@@ -128,12 +130,14 @@ fun TodayScreen(vm: AppViewModel, onManageMeals: () -> Unit) {
                         summary = list.takeIf { it.isNotEmpty() }?.let { "${it.sumOf { m -> m.kcal * m.quantity }.roundToInt()} kcal" }) {
                         FoodContent(slot, list, rankTemplates(activeTemplates, allMeals, slot), vm, date, onManageMeals)
                     }
-                    // post-meal blood sugar is its own step, shown once something was eaten in this slot
-                    if (list.isNotEmpty()) {
-                        val reading = glucose.firstOrNull { g -> g.kind == GLUCOSE_POST_MEAL && list.any { it.id == g.mealEntryId } }
+                    // post-meal blood sugar is its own step, shown once something was eaten in this slot (or a reading was imported)
+                    val reading = glucose.firstOrNull { g ->
+                        g.kind == GLUCOSE_POST_MEAL && (list.any { it.id == g.mealEntryId } || (g.mealEntryId == null && g.slot == slot.id))
+                    }
+                    if (list.isNotEmpty() || reading != null) {
                         TimelineItem("Blood sugar 2 h after ${slot.label.lowercase()}", ac.glucose, done = reading != null,
                             summary = reading?.let { u.glucose(it.value) }) {
-                            PostMealGlucose(list, reading, u, vm, date)
+                            PostMealGlucose(slot, list, reading, u, vm, date)
                         }
                     }
                 }
@@ -252,8 +256,21 @@ private fun MorningContent(entry: DayEntry?, glucose: List<GlucoseReading>, u: U
     var waist by remember { mutableStateOf(u.field(entry?.waist?.let(u::lenOut))) }
     var grip by remember { mutableStateOf(u.field(entry?.grip)) }
     var sugar by remember { mutableStateOf(u.field(fasting?.value?.let(u::gluOut), if (u.glu == "mg/dL") 0 else 1)) }
+    var sys by remember { mutableStateOf(u.field(entry?.bpSys, 0)) }
+    var dia by remember { mutableStateOf(u.field(entry?.bpDia, 0)) }
+    var pulse by remember { mutableStateOf(u.field(entry?.pulse, 0)) }
+    var more by remember { mutableStateOf(entry?.bpSys != null || entry?.pulse != null) }
     var saved by remember { mutableStateOf(true) }
 
+    // fasting only marks the day; meals can still be logged (soups etc.)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Fasting today", style = MaterialTheme.typography.bodyLarge)
+            Text("You can still log soups and drinks below", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = entry?.fasting == true, onCheckedChange = { vm.setFasting(date, it) })
+    }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         NumField("Weight", weight, Modifier.weight(1f), suffix = u.w) { weight = it; saved = false }
         NumField("Fasting glucose", sugar, Modifier.weight(1f), suffix = u.glu) { sugar = it; saved = false }
@@ -262,12 +279,18 @@ private fun MorningContent(entry: DayEntry?, glucose: List<GlucoseReading>, u: U
         NumField("Waist", waist, Modifier.weight(1f), suffix = u.len) { waist = it; saved = false }
         NumField("Grip (optional)", grip, Modifier.weight(1f)) { grip = it; saved = false }
     }
+    TextButton(onClick = { more = !more }) { Text(if (more) "Less" else "More: blood pressure, pulse") }
+    if (more) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        NumField("BP upper", sys, Modifier.weight(1f)) { sys = it; saved = false }
+        NumField("BP lower", dia, Modifier.weight(1f)) { dia = it; saved = false }
+        NumField("Pulse", pulse, Modifier.weight(1f)) { pulse = it; saved = false }
+    }
     Button(
         enabled = !saved, modifier = Modifier.fillMaxWidth(),
         colors = ButtonDefaults.buttonColors(containerColor = ac.body),
         onClick = {
             vm.saveMorning(date, parseNum(weight)?.let(u::wIn), parseNum(waist)?.let(u::lenIn), parseNum(grip),
-                parseNum(sugar)?.let(u::gluIn), fasting)
+                parseNum(sugar)?.let(u::gluIn), fasting, parseNum(sys), parseNum(dia), parseNum(pulse))
             saved = true
         },
     ) { Text(if (saved) "Saved" else "Save check-in") }
@@ -334,7 +357,7 @@ private fun MealRow(m: MealEntry, vm: AppViewModel) {
 
 /** Post-meal reading for a slot; linked to the slot's first meal, timed 2 h after it by default. */
 @Composable
-private fun PostMealGlucose(list: List<MealEntry>, reading: GlucoseReading?, u: Units, vm: AppViewModel, date: LocalDate) {
+private fun PostMealGlucose(slot: Slot, list: List<MealEntry>, reading: GlucoseReading?, u: Units, vm: AppViewModel, date: LocalDate) {
     if (reading != null) {
         RemovableRow("${u.glucose(reading.value)} at ${Repository.hhmm(reading.time)}") { vm.deleteGlucose(reading.id) }
         return
@@ -345,7 +368,7 @@ private fun PostMealGlucose(list: List<MealEntry>, reading: GlucoseReading?, u: 
         color = MaterialTheme.colorScheme.onSurfaceVariant) }
     GlucoseInput(u, "Blood sugar") { v ->
         vm.saveGlucose(GlucoseReading(date = date.toEpochDay(), time = (due ?: nowOr(date, 13 * 60)).coerceAtMost(23 * 60 + 59),
-            kind = GLUCOSE_POST_MEAL, mealEntryId = first.id, value = v))
+            kind = GLUCOSE_POST_MEAL, mealEntryId = first.id, value = v, slot = slot.id))
     }
 }
 

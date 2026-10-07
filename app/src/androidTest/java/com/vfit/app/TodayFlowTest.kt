@@ -5,6 +5,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -46,9 +47,17 @@ class TodayFlowTest {
         // morning check-in
         rule.onNode(hasText("Weight") and hasSetTextAction()).performTextInput("84.2")
         rule.onNode(hasText("Fasting glucose") and hasSetTextAction()).performTextInput("98")
+        rule.onNodeWithText("More: blood pressure, pulse").performClick()
+        rule.onNode(hasText("BP upper") and hasSetTextAction()).performTextInput("125")
+        rule.onNode(hasText("BP lower") and hasSetTextAction()).performTextInput("82")
         rule.onNodeWithText("Save check-in").performClick()      // one Save for weight, glucose, waist, grip
         rule.onNodeWithText("Saved").assertIsDisplayed()
         waitFor("84.2 kg")
+
+        // fasting marks the day but meals stay available
+        rule.onNode(hasText("Fasting today") , useUnmergedTree = true).assertIsDisplayed()
+        rule.onNode(isToggleable()).performClick()
+        waitFor("Fasting")
 
         // breakfast starts empty; nothing counts as eaten until it's logged
         rule.onAllNodesWithText("Not logged yet").onFirst().assertIsDisplayed()
@@ -107,6 +116,9 @@ class TodayFlowTest {
         rule.onNodeWithText("Dashboard").performClick()
         rule.onNodeWithText("Trend weight").assertIsDisplayed()
         rule.onNodeWithText("84.2 kg").assertIsDisplayed()
+        rule.onNode(hasText("so far", substring = true)).performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("Fasted").performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("125/82").performScrollTo().assertIsDisplayed()      // blood pressure tile
 
         // charts: scrubbing shows a dated readout
         rule.onNodeWithText("Charts").performClick()

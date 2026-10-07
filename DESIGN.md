@@ -53,6 +53,8 @@ A native Android app that replaces the Excel workflow. It does daily logging (we
 | grip | Double? | as entered |
 | calories_override | Int? | if set, used instead of the sum of meal entries (imported historical totals, quick totals) |
 | note | String? | |
+| fasting | Boolean | fasting day (v4); meals can still be logged; with nothing logged the day's intake is 0 |
+| bp_sys, bp_dia, pulse | Double? | blood pressure (mmHg) and pulse (bpm), v5 |
 
 **meal_template**: saved meals
 | column | type | notes |
@@ -100,10 +102,13 @@ A native Android app that replaces the Excel workflow. It does daily logging (we
 | kind | Int | 0 fasting, 1 two hours after a meal |
 | meal_entry_id | Long? | the meal it follows (kind 1 only) |
 | value | Double | stored in mg/dL; displayed in mg/dL or mmol/L (÷ 18.016) per settings |
+| slot | Int? | meal slot a post-meal reading follows (v5), so imported readings need no logged meal |
 
 **settings**: key/value table with the same keys as the workbook's Config sheet (units, sex, age, height, goal_weight, goal_rate, b_kcal_per_kg, energy_density, weight_noise_kg, offset_sedentary, offset_moderate, offset_heavy, adaptation_ref_date), plus glucose_unit (mg/dL or mmol/L).
 
-**Daily calories** = `calories_override` if present, else Σ(kcal × quantity) over meal_entry rows; null if there are neither. A total of 0 counts as missing, which matches the current script.
+**Daily calories** = `calories_override` if present, else Σ(kcal × quantity) over meal_entry rows; else 0 on a fasting day; else null (not logged). 0 is a real intake in the model (and in the script).
+
+**Gap filling** (before the model runs): a past day with nothing logged (not today, not fasting) gets intake interpolated between the nearest logged non-fasting days if both are within 7 days, otherwise the `assumed_intake` setting (1,600 = 2 × 800 kcal meals). Charts show these as "assumed".
 
 **Units:** stored internally in metric. Converted for display per the `units` setting (1 lb = 0.45359237 kg, 1 in = 2.54 cm).
 
@@ -171,7 +176,7 @@ Display rounding as in the script: kcal values to the nearest 10; weights to 0.1
 Bottom tabs: Today, Dashboard, Charts, Settings. (A History tab was dropped: the Today date picker and CSV export cover it.)
 
 1. **Today**: the day as a timeline, like a to-do list. Each step is a tinted card on a vertical line; its dot fills in once logged.
-   1. Morning check-in: weight, waist, grip (optional), fasting glucose. Units shown as field suffixes.
+   1. Morning check-in: "Fasting today" switch, then weight, fasting glucose, waist, grip (optional), saved together.
    2. Breakfast → 3. Morning snack → 4. Morning exercise → 5. Lunch → 6. Afternoon snack → 7. Exercise during the day →
       8. Dinner → 9. Evening snack.
       - Food steps: chips for saved meals (most-logged in that slot first); tap logs one. "Other" adds a one-off, optionally saved.
@@ -181,7 +186,11 @@ Bottom tabs: Today, Dashboard, Charts, Settings. (A History tab was dropped: the
    - Header: date with previous/next and a calendar date picker; pills for kcal eaten, trend weight and TDEE.
 2. **Dashboard**: tiles with a big number, a one-line explanation and a sparkline: trend weight, TDEE, intake, adaptation,
    settling weight, goal, waist, glucose (7-day fasting and post-meal averages), strength (if logged). A banner shows any
-   plateau/regain flag. "Show details" expands the full `write_summary()` text.
+   plateau/regain flag, and a "Next step" card (eat less / move more / hold / keep logging). The year-to-date card (top
+   of the Dashboard) counts and colours each day by what won: fasted, else lived (ate more than that day's TDEE), else
+   exercise or diet depending on whether estimated exercise calories (minutes × 4 net METs; 30 min for a strength set
+   without a duration) cover more of the deficit than eating less did. Blood-pressure tile and chart; the glucose tile
+   splits post-meal readings by breakfast/lunch/dinner. "Show details" expands the full `write_summary()` text.
 3. **Charts**: weight trend + forecast, TDEE vs intake, adaptation, waist, strength, blood glucose. Touch and slide on any
    chart to pin a date (or date and time, for glucose): a guide line and dots mark it, and a readout above the chart lists
    every series' value there.
@@ -192,6 +201,7 @@ Bottom tabs: Today, Dashboard, Charts, Settings. (A History tab was dropped: the
 Any change to entries or settings triggers `repository.recompute()`: load all days, build the input arrays, run `:model`, and cache the outputs in memory (`StateFlow<ModelResult>`). Outputs are not persisted, since they're always derivable. On a cold start the app recomputes once.
 
 ## 7. Import / export
+- **Vital data:** `tdee_tracker.py vital-to-csv` converts the program's export into inputs.csv (weight, waist, calories, fasting, BP, pulse), glucose.csv (fasting + 2 h after breakfast/lunch/dinner, with slots) and config.csv (height from BMI). An imported file is the source for its dates: its columns overwrite those days; other dates are untouched.
 - **Import:** CSV with the workbook's input columns (`date, weight, waist, calories, activity, grip, <lift>_load, <lift>_reps…`). Calories go into `calories_override`. A helper script, `tdee_tracker.py export-csv`, writes this CSV from the workbook, resolving formulas the same way `update` does.
 - **Export:** the same CSV format, plus meals, glucose and exercise CSVs, shared via the Android share sheet.
 

@@ -20,6 +20,8 @@ data class AppSettings(
     val offsetHeavy: Double = 400.0,
     val adaptationRefDate: LocalDate? = null,
     val glucoseMmol: Boolean = false,
+    /** Intake assumed for a past day with nothing logged and no logged neighbours to interpolate from (2 x 800 kcal meals). */
+    val assumedIntake: Double = 1600.0,
 ) {
     fun toModelConfig() = ModelConfig(
         male = male, age = age, heightCm = heightCm, goalWeightKg = goalWeightKg, goalRateKg = goalRateKg,
@@ -43,6 +45,7 @@ data class AppSettings(
         "offset_heavy" to num(offsetHeavy),
         "adaptation_ref_date" to (adaptationRefDate?.toString() ?: ""),
         "glucose_unit" to if (glucoseMmol) "mmol/L" else "mg/dL",
+        "assumed_intake" to num(assumedIntake),
     )
 
     companion object {
@@ -68,6 +71,7 @@ data class AppSettings(
                 adaptationRefDate = m["adaptation_ref_date"]?.trim()?.takeIf { it.isNotEmpty() }
                     ?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() },
                 glucoseMmol = m["glucose_unit"]?.trim()?.lowercase()?.startsWith("mmol") ?: d.glucoseMmol,
+                assumedIntake = n("assumed_intake", d.assumedIntake),
             )
         }
     }

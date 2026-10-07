@@ -117,3 +117,59 @@ class NextStepTest {
         assertTrue(run(70, { 90.0 }, 2500.0, AppSettings(goalWeightKg = null)).headline.startsWith("Maintain at about"))
     }
 }
+
+class YearStatsTest {
+    @Test
+    fun eachDayGetsTheKindThatWon() {
+        val today = LocalDate.of(2026, 3, 10)            // 69 days into the year
+        val start = LocalDate.of(2026, 1, 1)
+        // 60 days, steady weight on 2,000 kcal (so TDEE ~2,000); then:
+        //   days 40-44 eat 3,000 -> lived; day 50 fasting -> fasted; days 45-46 eat 1,900 + 60 min walk -> exercise;
+        //   days 47-48 eat 1,000 + 30 min walk -> diet (shortfall bigger than the walk)
+        val days = (0 until 60).map { i ->
+            val kcal = when (i) { in 40..44 -> 3000; 45, 46 -> 1900; 47, 48 -> 1000; else -> 2000 }
+            DayEntry(start.plusDays(i.toLong()).toEpochDay(), weight = 85.0, caloriesOverride = if (i == 50) null else kcal, fasting = i == 50)
+        }
+        val exercise = listOf(45 to 60, 46 to 60, 47 to 30, 48 to 30).map { (i, m) ->
+            com.vfit.app.data.ExerciseEntry(date = start.plusDays(i.toLong()).toEpochDay(), slot = 3, description = "walk", minutes = m)
+        }
+        val model = Model.compute(Repository.buildInputs(days, emptyList(), emptyList()), AppSettings().toModelConfig())
+        val y = com.vfit.app.ui.yearStats(today, days, emptyList(), exercise, emptyList(), model)
+        fun kind(i: Int) = y.kinds[start.plusDays(i.toLong())]
+        assertEquals(69, y.daysSoFar)
+        for (i in 40..44) assertEquals("day $i", com.vfit.app.ui.DayKind.LIVED, kind(i))
+        assertEquals(com.vfit.app.ui.DayKind.FASTED, kind(50))
+        assertEquals(com.vfit.app.ui.DayKind.EXERCISE, kind(45))
+        assertEquals(com.vfit.app.ui.DayKind.DIET, kind(47))
+        assertNull(kind(65))                             // no data
+        assertEquals(1, y.count(com.vfit.app.ui.DayKind.FASTED))
+    }
+}
+
+class GapFillTest {
+    private val d0 = LocalDate.of(2026, 5, 1)
+    private fun day(i: Int, kcal: Double?) = DayInput(d0.plusDays(i.toLong()), weightKg = 80.0, calories = kcal)
+
+    @Test
+    fun interpolatesShortGapsAssumesLongOnesSkipsFastingAndToday() {
+        val inputs = listOf(day(0, 1000.0), day(1, null), day(2, null), day(3, 2500.0), day(4, 0.0), day(5, null),
+            day(20, 1200.0), day(21, null))
+        val today = d0.plusDays(21)
+        val (out, assumed) = Repository.fillGaps(inputs, setOf(d0.plusDays(4).toEpochDay()), today, 1600.0)
+        val cal = out.associate { it.date to it.calories }
+        assertEquals(1500.0, cal[d0.plusDays(1)]!!, 1e-9)          // 1000 -> 2500 over 3 days
+        assertEquals(2000.0, cal[d0.plusDays(2)]!!, 1e-9)
+        assertEquals(0.0, cal[d0.plusDays(4)]!!, 1e-9)             // fasting day kept at 0, never an endpoint
+        assertEquals(1600.0, cal[d0.plusDays(5)]!!, 1e-9)          // next logged day is 15 days away -> assumed
+        assertEquals(1600.0, cal[d0.plusDays(10)]!!, 1e-9)         // missing rows inside the range are filled too
+        assertNull(cal[today])                                     // today isn't filled
+        assertTrue(d0.plusDays(1) in assumed && d0.plusDays(4) !in assumed && today !in assumed)
+    }
+
+    @Test
+    fun fastingDayWithNothingLoggedIsZero() {
+        assertEquals(0.0, Repository.dayCalories(DayEntry(1, fasting = true), emptyList())!!, 1e-9)
+        assertEquals(300.0, Repository.dayCalories(DayEntry(1, fasting = true), listOf(MealEntry(date = 1, name = "soup", kcal = 300)))!!, 1e-9)
+        assertNull(Repository.dayCalories(DayEntry(1), emptyList()))
+    }
+}
