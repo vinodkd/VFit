@@ -21,6 +21,7 @@ class Repository(private val db: VFitDb) {
     val templates = dao.templates()
     val lifts = dao.lifts()
     val glucose = dao.glucose()
+    val exercise = dao.exercise()
     val settings: Flow<AppSettings> = dao.settings().map { rows -> AppSettings.fromMap(rows.associate { it.key to it.value }) }
 
     /** Full recompute on every change; cheap (5x5 filter, one step per day). */
@@ -36,6 +37,8 @@ class Repository(private val db: VFitDb) {
     suspend fun saveLift(l: LiftSet) = dao.upsertLift(l)
     suspend fun deleteLift(date: Long, lift: String) = dao.deleteLift(date, lift)
     suspend fun saveGlucose(g: GlucoseReading) = dao.upsertGlucose(g)
+    suspend fun saveExercise(e: ExerciseEntry) = dao.upsertExercise(e)
+    suspend fun deleteExercise(id: Long) = dao.deleteExercise(id)
     suspend fun deleteGlucose(id: Long) = dao.deleteGlucose(id)
     suspend fun saveSettings(s: AppSettings) = dao.upsertSettings(s.toMap().map { SettingRow(it.key, it.value) })
     suspend fun day(date: Long) = dao.day(date)
@@ -68,7 +71,7 @@ class Repository(private val db: VFitDb) {
         return "Imported ${days.size} days."
     }
 
-    /** Returns file name -> CSV text: inputs.csv (re-importable), config.csv, meals.csv, glucose.csv. */
+    /** Returns file name -> CSV text: inputs.csv (re-importable), config.csv, meals.csv, glucose.csv, exercise.csv. */
     suspend fun exportFiles(): Map<String, String> {
         val days = dao.allDays()
         val meals = dao.allMeals()
@@ -89,8 +92,12 @@ class Repository(private val db: VFitDb) {
             settings.toMap().forEach { (k, v) -> appendLine("$k,$v") }
         }
         val mealsCsv = buildString {
-            appendLine("date,time,name,kcal,quantity")
-            for (m in meals) appendLine("${LocalDate.ofEpochDay(m.date)},${m.time?.let(::hhmm) ?: ""},${q(m.name)},${m.kcal},${m.quantity}")
+            appendLine("date,time,slot,name,kcal,quantity")
+            for (m in meals) appendLine("${LocalDate.ofEpochDay(m.date)},${m.time?.let(::hhmm) ?: ""},${Slot.ofMeal(m)?.label ?: ""},${q(m.name)},${m.kcal},${m.quantity}")
+        }
+        val exerciseCsv = buildString {
+            appendLine("date,slot,description,minutes")
+            for (e in dao.allExercise()) appendLine("${LocalDate.ofEpochDay(e.date)},${Slot.of(e.slot)?.label ?: ""},${q(e.description)},${e.minutes ?: ""}")
         }
         val glucoseCsv = buildString {
             appendLine("date,time,kind,meal,mg_dl")
@@ -100,7 +107,8 @@ class Repository(private val db: VFitDb) {
                     "${q(g.mealEntryId?.let { byId[it]?.name } ?: "")},${g.value}"
             )
         }
-        return linkedMapOf("inputs.csv" to inputsCsv, "config.csv" to configCsv, "meals.csv" to mealsCsv, "glucose.csv" to glucoseCsv)
+        return linkedMapOf("inputs.csv" to inputsCsv, "config.csv" to configCsv, "meals.csv" to mealsCsv, "glucose.csv" to glucoseCsv,
+            "exercise.csv" to exerciseCsv)
     }
 
     private fun s(v: Double?) = v?.toString() ?: ""

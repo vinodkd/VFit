@@ -28,7 +28,8 @@ A native Android app that replaces the Excel workflow. It does daily logging (we
 | Language / UI | Kotlin, Jetpack Compose, Material 3 |
 | Storage | Room (SQLite) |
 | Architecture | Single activity, MVVM; ViewModels expose `StateFlow` |
-| Charts | Vico (Compose-native) |
+| Charts | Own Compose `Canvas` chart (no library) with a touch scrubber |
+| Theme | VFit palette (navy + orange from the logo), light and dark; one accent colour per kind of timeline item |
 | Model | `:model` Gradle module, pure Kotlin/JVM, no Android dependencies. 5×5 matrix ops written by hand (no library needed) |
 | Background work | None in v1 (recomputing is fast enough to run on demand) |
 | Min SDK | 26 (Android 8.0); target the latest SDK |
@@ -36,8 +37,7 @@ A native Android app that replaces the Excel workflow. It does daily logging (we
 
 ### Modules
 ```
-:app      UI, ViewModels, navigation
-:data     Room entities/DAOs, repository, CSV import/export
+:app      UI, ViewModels, navigation; data layer in package com.vfit.app.data (Room, repository, CSV)
 :model    Kalman filter + derived outputs (pure Kotlin, unit-tested)
 ```
 
@@ -71,6 +71,17 @@ A native Android app that replaces the Excel workflow. It does daily logging (we
 | name | String | copied from the template at log time |
 | kcal | Int | copied from the template at log time, so editing a template doesn't rewrite history |
 | quantity | Double | default 1.0 (e.g. 0.5 = half portion) |
+| time | Int? | minutes after midnight when logged (today only) |
+| slot | Int? | timeline slot (see Screens); null for meals logged before v2, placed by time |
+
+**exercise_entry** (v2): exercise by timeline slot. Recorded only; the model uses the day's activity level.
+| column | type | notes |
+|---|---|---|
+| id | Long (PK) | |
+| date | LocalDate | |
+| slot | Int | morning exercise or exercise during the day |
+| description | String | e.g. "walk" |
+| minutes | Int? | |
 
 **lift_set**: top working set per lift per day
 | column | type | notes |
@@ -157,31 +168,38 @@ Display rounding as in the script: kcal values to the nearest 10; weights to 0.1
 - When the model changes, change the Python version first, regenerate the golden files, then port.
 
 ## 5. Screens
-1. **Today** (home)
-   - Weight field with a numeric keypad, empty by default; yesterday's value shown as a hint.
-   - Meals: chips for saved meals, most recently used first. Tap adds one, long-press sets the quantity. "+ One-off meal" takes a name and kcal. Shows the day's total kcal.
-   - Activity: four-way segmented control.
-   - Waist and grip fields, always shown; lift sets on demand.
-   - Blood glucose: a "Fasting" field, and a "2 h after" field under each meal logged that day (prefilled time = meal time + 2 h).
-   - Date switcher to fill in past days.
-2. **Dashboard**: the four Summary sections as cards (Current status incl. adaptation, Forecast, Plateau check, Composition), with the same wording and gating messages as `write_summary()`, plus a Glucose card: 7-day average fasting and 2 h post-meal values.
-3. **Charts**: (a) daily weight dots, trend line and a 26-week forecast with its 80% band and the goal line; (b) daily intake, 14-day average, and TDEE with its 80% band; (c) waist and strength index; (d) blood glucose: fasting and 2 h post-meal readings, with their 7-day averages.
-4. **History**: list of days showing the key inputs and outputs; tap a day to edit it in the Today screen.
-5. **Meals**: manage saved meals (name, kcal, archive).
-6. **Settings**: Config values, units, import/export.
+Bottom tabs: Today, Dashboard, Charts, Settings. (A History tab was dropped: the Today date picker and CSV export cover it.)
+
+1. **Today**: the day as a timeline, like a to-do list. Each step is a tinted card on a vertical line; its dot fills in once logged.
+   1. Morning check-in: weight, waist, grip (optional), fasting glucose. Units shown as field suffixes.
+   2. Breakfast → 3. Morning snack → 4. Morning exercise → 5. Lunch → 6. Afternoon snack → 7. Exercise during the day →
+      8. Dinner → 9. Evening snack.
+      - Food steps: chips for saved meals (most-logged in that slot first); tap logs one. "Other" adds a one-off, optionally saved.
+        Each logged meal has −/+ quantity and a "2 h after" glucose field underneath.
+      - Exercise steps: chips for recent exercises; add with duration.
+   10. End of day: overall activity level (feeds the model), strength top sets, and the imported-total notice.
+   - Header: date with previous/next and a calendar date picker; pills for kcal eaten, trend weight and TDEE.
+2. **Dashboard**: tiles with a big number, a one-line explanation and a sparkline: trend weight, TDEE, intake, adaptation,
+   settling weight, goal, waist, glucose (7-day fasting and post-meal averages), strength (if logged). A banner shows any
+   plateau/regain flag. "Show details" expands the full `write_summary()` text.
+3. **Charts**: weight trend + forecast, TDEE vs intake, adaptation, waist, strength, blood glucose. Touch and slide on any
+   chart to pin a date (or date and time, for glucose): a guide line and dots mark it, and a readout above the chart lists
+   every series' value there.
+4. **Meals** (from Today or Settings): manage saved meals (name, kcal, hide).
+5. **Settings**: Config values, units, glucose unit, import/export.
 
 ## 6. Recompute flow
 Any change to entries or settings triggers `repository.recompute()`: load all days, build the input arrays, run `:model`, and cache the outputs in memory (`StateFlow<ModelResult>`). Outputs are not persisted, since they're always derivable. On a cold start the app recomputes once.
 
 ## 7. Import / export
 - **Import:** CSV with the workbook's input columns (`date, weight, waist, calories, activity, grip, <lift>_load, <lift>_reps…`). Calories go into `calories_override`. A helper script, `tdee_tracker.py export-csv`, writes this CSV from the workbook, resolving formulas the same way `update` does.
-- **Export:** the same CSV format, plus meals and glucose CSVs, shared via the Android share sheet.
+- **Export:** the same CSV format, plus meals, glucose and exercise CSVs, shared via the Android share sheet.
 
 ## 8. Milestones
 1. `:model` port and golden tests passing against both datasets.
 2. Room schema, CSV import, Today screen with saved meals.
 3. Dashboard and Charts.
-4. History, Settings, export. Install on your phone for daily use, distributed as a sideloaded APK.
+4. Settings, export. Install on your phone for daily use, distributed as a sideloaded APK.
 5. (Later) Health Connect and the food database.
 
 ## 9. Open questions

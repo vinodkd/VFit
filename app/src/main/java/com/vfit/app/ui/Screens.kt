@@ -21,6 +21,10 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,35 +56,117 @@ import java.time.LocalDate
 import java.util.Locale
 import kotlin.math.roundToInt
 
-// ------------------------------------------------------------------ Summary
+// ------------------------------------------------------------------ Dashboard
+
+private data class Tile(val label: String, val value: String, val sub: String, val color: Color, val spark: List<Double> = emptyList())
 
 @Composable
-fun SummaryScreen(vm: AppViewModel) {
+fun DashboardScreen(vm: AppViewModel) {
     val model by vm.model.collectAsState()
     val settings by vm.settings.collectAsState()
     val glucose by vm.glucose.collectAsState()
     val u = Units(settings)
+    val ac = LocalAccents.current
+    var details by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         val r = model
         if (r == null) {
-            Text("No weights entered yet. Add today's weight on the Today tab, or import your data in Settings.")
-        } else for (sec in summarize(r, settings)) SectionCard(sec)
+            Text("No weights yet. Log one on Today, or import your data in Settings.")
+            return@Column
+        }
+        val o = r.latest!!
+        val recent = r.outputs.takeLast(90)
+        Column {
+            Text("Dashboard", style = MaterialTheme.typography.headlineMedium)
+            Text(
+                "As of ${o.date.format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM", Locale.US))}" +
+                    (o.dataCoverage?.let { " · data coverage %.0f%%".format(Locale.US, it * 100) } ?: "") +
+                    (o.tdeeConfidence?.let { " · TDEE confidence $it" } ?: ""),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        val step = nextStep(r, settings)
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("NEXT STEP", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(step.headline, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(step.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+        }
+
+        o.plateauFlag?.let { flag ->
+            Card(colors = CardDefaults.cardColors(containerColor = ac.meal.copy(alpha = 0.15f).compositeOver(MaterialTheme.colorScheme.surface))) {
+                Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                    Text(if (flag == "PLATEAU") "Plateau: trend flat for 3+ weeks" else "Regaining: trend rising for 3+ weeks",
+                        style = MaterialTheme.typography.titleMedium, color = ac.meal)
+                    o.plateauCause?.let { Text("Likely cause: $it", style = MaterialTheme.typography.bodyMedium) }
+                }
+            }
+        }
 
         val since = LocalDate.now().minusDays(6).toEpochDay()
-        val recent = glucose.filter { it.date >= since }
-        fun avg(kind: Int) = recent.filter { it.kind == kind }.map { it.value }.takeIf { it.isNotEmpty() }?.average()
-        SectionCard(
-            SummarySection(
-                "Glucose (last 7 days)",
-                listOf(
-                    "Fasting average" to (avg(GLUCOSE_FASTING)?.let { u.glucose(it) + "  (${recent.count { g -> g.kind == GLUCOSE_FASTING }} readings)" } ?: "-"),
-                    "2 h after meals" to (avg(GLUCOSE_POST_MEAL)?.let { u.glucose(it) + "  (${recent.count { g -> g.kind == GLUCOSE_POST_MEAL }} readings)" } ?: "-"),
-                ),
-            )
-        )
+        val g7 = glucose.filter { it.date >= since }
+        fun gAvg(kind: Int) = g7.filter { it.kind == kind }.map { it.value }.takeIf { it.isNotEmpty() }?.average()
+        val fasting = glucose.filter { it.kind == GLUCOSE_FASTING }
+
+        val tiles = buildList {
+            add(Tile("Trend weight", u.weight(o.trendWeight),
+                o.weeklyRate?.let { "%+.2f %s/week".format(Locale.US, u.wOut(it), u.w) } ?: "rate after 2 weeks",
+                ac.body, recent.map { u.wOut(it.trendWeight) }))
+            add(Tile("TDEE", o.tdeeEst?.let { kcal(it) } ?: "—",
+                o.tdeeEst?.let { "kcal/day · ${kcal(o.tdeeLow)}–${kcal(o.tdeeHigh)}" } ?: "needs ~3 weeks of data",
+                ac.glucose, recent.map { it.tdeeEst ?: Double.NaN }))
+            add(Tile("Intake (14 d)", o.intakeAvg14d?.let { kcal(it) } ?: "—",
+                o.deficit?.let { if (it >= 0) "deficit ${kcal(it)} kcal/day" else "surplus ${kcal(-it)} kcal/day" } ?: "kcal/day",
+                ac.meal, recent.map { it.intakeAvg14d ?: Double.NaN }))
+            add(Tile("Adaptation", o.adaptation?.let { "%+,.0f".format(Locale.US, it) } ?: "—",
+                o.adaptation?.let { "kcal/day beyond weight lost, since ${r.outputs.first { x -> x.adaptation != null }.date}" } ?: "after TDEE is estimated",
+                ac.day, recent.map { it.adaptation ?: Double.NaN }))
+            add(Tile("Settling weight", o.settlingWeight?.let { u.weight(it) } ?: "—",
+                o.proj26w?.let { "in 26 weeks: ${u.weight(it)}" } ?: "needs ~4 weeks of data", ac.body))
+            add(Tile("Goal", o.goalDate?.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", Locale.US)) ?: o.goalNote ?: "—",
+                o.targetIntake?.let { "target intake ${kcal(it)} kcal/day" } ?: settings.goalWeightKg?.let { "goal ${u.weight(it)}" } ?: "set a goal in Settings",
+                ac.exercise))
+            add(Tile("Waist", o.waistTrend?.let { "%+.2f".format(Locale.US, u.lenOut(it)) } ?: "—",
+                (o.waistTrend?.let { "${u.len}/week" } ?: "needs 3 readings in 4 weeks") +
+                    (o.waistPerWtLost?.let { " · %.2f %s per %s lost".format(Locale.US, u.lenOut(u.wIn(it)), u.len, u.w) } ?: ""),
+                ac.body, r.waist.toList().takeLast(90)))
+            add(Tile("Fasting glucose (7 d)", gAvg(GLUCOSE_FASTING)?.let { u.glucose(it) } ?: "—",
+                gAvg(GLUCOSE_POST_MEAL)?.let { "2 h after meals: ${u.glucose(it)}" } ?: "no post-meal readings this week",
+                ac.glucose, fasting.takeLast(30).map { u.gluOut(it.value) }))
+            o.strengthIndex?.let { si ->
+                add(Tile("Strength", "%+.1f%%".format(Locale.US, si * 100), o.strengthFlag ?: "vs baseline, 28-day window",
+                    ac.exercise, r.strength.toList().takeLast(90).map { it * 100 }))
+            }
+        }
+        for (pair in tiles.chunked(2)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                for (t in pair) TileCard(t, Modifier.weight(1f))
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+
+        TextButton(onClick = { details = !details }) { Text(if (details) "Hide details" else "Show details") }
+        if (details) for (sec in summarize(r, settings)) SectionCard(sec)
+    }
+}
+
+@Composable
+private fun TileCard(t: Tile, modifier: Modifier) {
+    Card(modifier, colors = CardDefaults.cardColors(containerColor = t.color.copy(alpha = 0.08f).compositeOver(MaterialTheme.colorScheme.surface))) {
+        Column(Modifier.padding(12.dp).heightIn(min = 120.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(t.label, style = MaterialTheme.typography.labelMedium, color = t.color)
+            // numbers big; words ("not at current intake") smaller so they fit
+            val numeric = t.value.firstOrNull()?.let { it.isDigit() || it == '+' || it == '-' } == true
+            Text(t.value, style = if (numeric) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleMedium, maxLines = 2)
+            Text(t.sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3)
+            Spacer(Modifier.weight(1f))
+            Sparkline(t.spark, t.color, Modifier.padding(top = 6.dp))
+        }
     }
 }
 
@@ -102,13 +188,6 @@ private fun SectionCard(sec: SummarySection) {
 
 // ------------------------------------------------------------------ Charts
 
-private val BLUE = Color(0xFF1F4E79)
-private val GREY = Color(0xFF9AA7B8)
-private val ORANGE = Color(0xFFC55A11)
-private val GREEN = Color(0xFF548235)
-private val RED = Color(0xFFC00000)
-private val PURPLE = Color(0xFF7030A0)
-private val TEAL = Color(0xFF2E75B6)
 
 @Composable
 fun ChartsScreen(vm: AppViewModel) {
@@ -116,7 +195,11 @@ fun ChartsScreen(vm: AppViewModel) {
     val settings by vm.settings.collectAsState()
     val glucose by vm.glucose.collectAsState()
     val u = Units(settings)
+    val ac = LocalAccents.current
+    val BLUE = ac.body; val ORANGE = ac.meal; val GREEN = ac.exercise; val RED = ac.glucose; val PURPLE = ac.day; val TEAL = ac.body
+    val GREY = MaterialTheme.colorScheme.outline
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Text("Charts", style = MaterialTheme.typography.headlineMedium)
         val r = model
         if (r == null) {
             Text("No data yet.")
@@ -147,10 +230,10 @@ fun ChartsScreen(vm: AppViewModel) {
             LineChart(
                 "Estimated TDEE vs intake", "kcal/day",
                 listOf(
-                    Series.Dots("Daily intake", GREY, xDays, r.calories.toList()),
-                    Series.Line("Intake, 14-day avg", Color(0xFF7F7F7F), outX, r.outputs.map { it.intakeAvg14d ?: nan }),
-                    Series.Band("TDEE 80% range", RED, tdeeX.map { it.date.toEpochDay().toDouble() }, tdeeX.map { it.tdeeLow!! }, tdeeX.map { it.tdeeHigh!! }),
-                    Series.Line("Estimated TDEE", RED, tdeeX.map { it.date.toEpochDay().toDouble() }, tdeeX.map { it.tdeeEst!! }),
+                    Series.Dots("Daily intake", ORANGE.copy(alpha = 0.45f), xDays, r.calories.toList()),
+                    Series.Line("Intake, 14-day avg", ORANGE, outX, r.outputs.map { it.intakeAvg14d ?: nan }),
+                    Series.Band("TDEE 80% range", BLUE, tdeeX.map { it.date.toEpochDay().toDouble() }, tdeeX.map { it.tdeeLow!! }, tdeeX.map { it.tdeeHigh!! }),
+                    Series.Line("Estimated TDEE", BLUE, tdeeX.map { it.date.toEpochDay().toDouble() }, tdeeX.map { it.tdeeEst!! }),
                 ),
             )
             HorizontalDivider()
@@ -200,50 +283,11 @@ private fun rolling(v: List<Double>, n: Int) = v.indices.map { i ->
     v.subList(maxOf(0, i - n + 1), i + 1).filter { !it.isNaN() }.takeIf { it.isNotEmpty() }?.average() ?: Double.NaN
 }
 
-// ------------------------------------------------------------------ History
-
-@Composable
-fun HistoryScreen(vm: AppViewModel, onOpenDay: (LocalDate) -> Unit) {
-    val model by vm.model.collectAsState()
-    val days by vm.days.collectAsState()
-    val meals by vm.meals.collectAsState()
-    val settings by vm.settings.collectAsState()
-    val u = Units(settings)
-    val outs = model?.outputs?.associateBy { it.date } ?: emptyMap()
-    val dayMap = days.orEmpty().associateBy { it.date }
-    val mealMap = meals.groupBy { it.date }
-    val dates = (dayMap.keys + mealMap.keys).sortedDescending()
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)) {
-        item {
-            Row(Modifier.padding(bottom = 8.dp)) {
-                Text("Date", Modifier.weight(1.3f), style = MaterialTheme.typography.labelMedium)
-                Text("Weight", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
-                Text("Trend", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
-                Text("kcal", Modifier.weight(0.9f), style = MaterialTheme.typography.labelMedium)
-                Text("TDEE", Modifier.weight(0.9f), style = MaterialTheme.typography.labelMedium)
-            }
-        }
-        items(dates, key = { it }) { e ->
-            val d = LocalDate.ofEpochDay(e)
-            val o = outs[d]
-            val cal = Repository.dayCalories(dayMap[e], mealMap[e].orEmpty())
-            Row(Modifier.fillMaxWidth().clickable { onOpenDay(d) }.padding(vertical = 8.dp)) {
-                Text(d.toString(), Modifier.weight(1.3f))
-                Text(dayMap[e]?.weight?.let { "%.1f".format(Locale.US, u.wOut(it)) } ?: "", Modifier.weight(1f))
-                Text(o?.let { "%.1f".format(Locale.US, u.wOut(it.trendWeight)) } ?: "", Modifier.weight(1f))
-                Text(cal?.roundToInt()?.toString() ?: "", Modifier.weight(0.9f))
-                Text(o?.tdeeEst?.let { kcal(it) } ?: "", Modifier.weight(0.9f))
-            }
-            HorizontalDivider()
-        }
-    }
-}
-
 // ------------------------------------------------------------------ Meals
 
 @Composable
 fun MealsScreen(vm: AppViewModel, onBack: () -> Unit) {
-    val templates by vm.templates.collectAsState()
+    val templates = vm.templates.collectAsState().value.orEmpty()
     var editing by remember { mutableStateOf<MealTemplate?>(null) }
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {

@@ -54,8 +54,8 @@ class RepositoryTest {
         assertEquals(1800.0, repo.model.first()!!.calories[0], 1e-9)
 
         val files = repo.exportFiles()
-        assertEquals(setOf("inputs.csv", "config.csv", "meals.csv", "glucose.csv"), files.keys)
-        assertTrue(files["meals.csv"]!!.contains("2026-03-01,,x,500,1.0"))
+        assertEquals(setOf("inputs.csv", "config.csv", "meals.csv", "glucose.csv", "exercise.csv"), files.keys)
+        assertTrue(files["meals.csv"]!!.contains("2026-03-01,,,x,500,1.0"))
 
         // re-import into a fresh database gives the same model output
         val db2 = memDb()

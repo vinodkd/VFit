@@ -80,3 +80,40 @@ class AppLogicTest {
         assertTrue(sec[1].rows.toMap()["Settling weight"]!!.endsWith(")"))
     }
 }
+
+class SlotTest {
+    @Test
+    fun mealsWithoutSlotArePlacedByTime() {
+        assertEquals(com.vfit.app.data.Slot.BREAKFAST, com.vfit.app.data.Slot.forMealTime(8 * 60))
+        assertEquals(com.vfit.app.data.Slot.LUNCH, com.vfit.app.data.Slot.forMealTime(13 * 60))
+        assertEquals(com.vfit.app.data.Slot.DINNER, com.vfit.app.data.Slot.forMealTime(19 * 60 + 30))
+        assertEquals(com.vfit.app.data.Slot.EVENING_SNACK, com.vfit.app.data.Slot.forMealTime(22 * 60))
+        assertNull(com.vfit.app.data.Slot.forMealTime(null))
+        // an explicit slot wins over the time
+        val m = MealEntry(date = 0, name = "x", kcal = 1, time = 8 * 60, slot = com.vfit.app.data.Slot.LUNCH.id)
+        assertEquals(com.vfit.app.data.Slot.LUNCH, com.vfit.app.data.Slot.ofMeal(m))
+    }
+}
+
+class NextStepTest {
+    private val start = LocalDate.of(2026, 3, 1)
+    private fun run(days: Int, weight: (Int) -> Double, kcal: Double, s: AppSettings) =
+        com.vfit.app.ui.nextStep(Model.compute((0 until days).map { DayInput(start.plusDays(it.toLong()), weightKg = weight(it), calories = kcal) }, s.toModelConfig())!!, s)
+
+    @Test
+    fun tooLittleDataSaysKeepLogging() {
+        assertEquals("Keep logging", run(10, { 90.0 }, 2000.0, AppSettings()).headline)
+    }
+
+    @Test
+    fun stalledAboveGoalSaysEatLessOrMoveMore() {
+        val step = run(70, { 90.0 }, 2500.0, AppSettings(goalWeightKg = 80.0))
+        assertTrue(step.headline, step.headline.startsWith("Eat about") && step.headline.endsWith("or move more"))
+        assertTrue(step.detail, step.detail.contains("more walking a day"))
+    }
+
+    @Test
+    fun noGoalSaysMaintain() {
+        assertTrue(run(70, { 90.0 }, 2500.0, AppSettings(goalWeightKg = null)).headline.startsWith("Maintain at about"))
+    }
+}

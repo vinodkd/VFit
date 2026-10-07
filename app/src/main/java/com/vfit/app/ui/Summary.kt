@@ -78,3 +78,66 @@ fun summarize(r: ModelResult, s: AppSettings): List<SummarySection> {
 
     return listOf(status, forecast, SummarySection("Plateau check", plateauRows), SummarySection("Composition", compRows))
 }
+
+data class NextStep(val headline: String, val detail: String)
+
+/**
+ * The one thing to do next, from the latest day. Plateau advice follows write_summary() in tdee_tracker.py;
+ * otherwise it compares 14-day intake with the intake that gives the goal rate.
+ * Calories are in the app's logged units, so the advice holds even if logging is systematically off.
+ */
+fun nextStep(r: ModelResult, s: AppSettings): NextStep {
+    val u = Units(s)
+    val o = r.latest ?: return NextStep("Log your first weight", "Add this morning's weight on Today.")
+    fun f(fmt: String, vararg a: Any?) = String.format(Locale.US, fmt, *a)
+    // net kcal per minute of brisk walking (~2.5 METs above rest): 2.5 * 3.5 * kg / 200
+    val walkPerMin = 2.5 * 3.5 * o.trendWeight / 200
+    /** Exercise alternative to eating `kcal` less; walking is capped at an hour, the rest comes from food. */
+    fun walk(kcal: Double): String {
+        val mins = kcal / walkPerMin
+        return if (mins <= 60) f("about %.0f min more walking a day", mins)
+        else f("an hour more walking a day plus eating about %s kcal less", kcal(kcal - 60 * walkPerMin))
+    }
+    val intake = o.intakeAvg14d
+    val target = o.targetIntake
+    val strength = o.strengthFlag?.let { " Strength is dropping: check protein and training before cutting further." } ?: ""
+
+    if (o.tdeeEst == null || intake == null) return NextStep(
+        "Keep logging",
+        "Log weight every morning and each meal. TDEE and forecasts appear after about 3 weeks with calories on most days.",
+    )
+    o.plateauFlag?.let {
+        val cause = o.plateauCause.orEmpty()
+        return when {
+            cause.startsWith("possible water") -> NextStep("Hold steady for 2–3 weeks",
+                "The scale is flat but ${cause.substringAfter("(").removeSuffix(")")}, so fat loss is probably continuing. Don't change anything yet.$strength")
+            cause.startsWith("can't tell") -> NextStep("Log every meal for 2–3 weeks",
+                "There aren't enough logged calories to tell eating apart from expenditure.$strength")
+            cause.startsWith("deficit") -> {
+                val gap = target?.let { intake - it }?.takeIf { it > 50 } ?: 150.0
+                NextStep(f("Eat about %s kcal/day less, or move more", kcal(gap)),
+                    f("Your deficit has closed. Aim for about %s kcal/day (now %s), or add %s. Or hold 1–2 weeks and re-check.",
+                        kcal(target ?: (intake - gap)), kcal(intake), walk(gap)) + strength)
+            }
+            else -> NextStep("Tighten logging for 2 weeks",
+                "The model still sees a deficit, so the stall is likely unlogged food. Log everything, including oils and bites, before changing the plan.$strength")
+        }
+    }
+    val goal = s.goalWeightKg
+    if (goal == null || o.trendWeight <= goal || target == null) return NextStep(
+        f("Maintain at about %s kcal/day", kcal(o.tdeeEst)),
+        (if (goal == null) "No goal weight is set (Settings). " else "You're at your goal. ") +
+            "Eating near your TDEE keeps weight steady.$strength",
+    )
+    val gap = intake - target
+    return when {
+        gap > 100 -> NextStep(f("Eat about %s kcal/day less, or move more", kcal(gap)),
+            f("To lose %s %s/week you need about %s kcal/day; your 14-day average is %s. Or add %s.",
+                f("%.2f", u.wOut(s.goalRateKg)).trimEnd('0').trimEnd('.'), u.w, kcal(target), kcal(intake), walk(gap)) + strength)
+        gap < -250 -> NextStep("You can eat a little more",
+            f("You're about %s kcal/day under the intake for your goal rate (%s kcal/day). Losing faster than planned risks muscle.",
+                kcal(-gap), kcal(target)) + strength)
+        else -> NextStep(f("On track: keep intake near %s kcal/day", kcal(target)),
+            "Your intake matches your goal rate. Keep logging.$strength")
+    }
+}

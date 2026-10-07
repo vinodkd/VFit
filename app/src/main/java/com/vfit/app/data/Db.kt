@@ -1,6 +1,7 @@
 package com.vfit.app.data
 
 import android.content.Context
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -11,6 +12,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 // Dates are stored as epoch days, times as minutes after midnight. Weights in kg, lengths in cm, glucose in mg/dL.
@@ -47,6 +50,17 @@ data class MealEntry(
     val kcal: Int,
     val quantity: Double = 1.0,
     val time: Int? = null,
+    /** Timeline slot (see [Slot]); null for meals logged before slots existed. */
+    val slot: Int? = null,
+)
+
+@Entity(tableName = "exercise_entry", indices = [Index("date")])
+data class ExerciseEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val date: Long,
+    val slot: Int,
+    val description: String,
+    val minutes: Int? = null,
 )
 
 @Entity(tableName = "lift_set", primaryKeys = ["date", "lift"])
@@ -55,6 +69,8 @@ data class LiftSet(
     val lift: String,
     val load: Double,
     val reps: Int,
+    /** Exercise slot the set was done in (v3); older sets default to "exercise during the day". */
+    @ColumnInfo(defaultValue = "6") val slot: Int = 6,
 ) {
     /** Epley estimated 1-rep max, as in tdee_tracker.py. */
     val e1rm: Double get() = if (reps == 1) load else load * (1 + reps / 30.0)
@@ -84,6 +100,10 @@ interface VFitDao {
     @Query("SELECT * FROM lift_set ORDER BY date, lift") fun lifts(): Flow<List<LiftSet>>
     @Query("SELECT * FROM glucose_reading ORDER BY date, time") fun glucose(): Flow<List<GlucoseReading>>
     @Query("SELECT * FROM setting") fun settings(): Flow<List<SettingRow>>
+    @Query("SELECT * FROM exercise_entry ORDER BY date, slot, id") fun exercise(): Flow<List<ExerciseEntry>>
+    @Query("SELECT * FROM exercise_entry ORDER BY date, slot, id") suspend fun allExercise(): List<ExerciseEntry>
+    @Upsert suspend fun upsertExercise(e: ExerciseEntry): Long
+    @Query("DELETE FROM exercise_entry WHERE id = :id") suspend fun deleteExercise(id: Long)
 
     @Query("SELECT * FROM day_entry WHERE date = :date") suspend fun day(date: Long): DayEntry?
     @Query("SELECT * FROM day_entry ORDER BY date") suspend fun allDays(): List<DayEntry>
@@ -116,8 +136,9 @@ interface VFitDao {
 }
 
 @Database(
-    entities = [DayEntry::class, MealTemplate::class, MealEntry::class, LiftSet::class, GlucoseReading::class, SettingRow::class],
-    version = 1,
+    entities = [DayEntry::class, MealTemplate::class, MealEntry::class, LiftSet::class, GlucoseReading::class, SettingRow::class,
+        ExerciseEntry::class],
+    version = 3,
     exportSchema = false,
 )
 abstract class VFitDb : RoomDatabase() {
@@ -125,6 +146,25 @@ abstract class VFitDb : RoomDatabase() {
 
     companion object {
         fun open(context: Context): VFitDb =
-            Room.databaseBuilder(context, VFitDb::class.java, "vfit.db").build()
+            Room.databaseBuilder(context, VFitDb::class.java, "vfit.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+
+        /** v2: meal timeline slots and exercise entries. */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE meal_entry ADD COLUMN slot INTEGER")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS exercise_entry (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "date INTEGER NOT NULL, slot INTEGER NOT NULL, description TEXT NOT NULL, minutes INTEGER)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_exercise_entry_date ON exercise_entry (date)")
+            }
+        }
+
+        /** v3: strength sets belong to an exercise slot. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE lift_set ADD COLUMN slot INTEGER NOT NULL DEFAULT 6")
+            }
+        }
     }
 }
